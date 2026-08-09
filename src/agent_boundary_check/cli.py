@@ -62,6 +62,17 @@ def _policy(args):
     return load_policy(Path(args.policy)) if getattr(args, "policy", None) else None
 
 
+def _require_installed_builtin(agent_name: str) -> None:
+    adapter_cls = BUILTIN_ADAPTERS.get(agent_name)
+    if adapter_cls is None:
+        return
+    if shutil.which(adapter_cls.executable) is None:
+        raise ValueError(
+            f"{agent_name} CLI is not installed or not on PATH; "
+            "run 'agent-boundary agents' to see detected agents"
+        )
+
+
 def cmd_verify(args) -> int:
     try:
         agent_name = args.agent
@@ -72,6 +83,7 @@ def cmd_verify(args) -> int:
             if len(detected) > 1:
                 raise ValueError(f"multiple supported agents detected ({', '.join(detected)}); choose one explicitly")
             agent_name = detected[0]
+        _require_installed_builtin(agent_name)
         adapter = get_adapter(agent_name, args.command)
         report, lab = verify(
             adapter,
