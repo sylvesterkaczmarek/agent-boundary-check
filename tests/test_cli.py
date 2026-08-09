@@ -9,7 +9,7 @@ def test_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert "0.1.1" in capsys.readouterr().out
+    assert "0.1.2" in capsys.readouterr().out
 
 
 def test_demo_writes_json(tmp_path):
@@ -39,6 +39,15 @@ def test_verify_auto_requires_choice_for_multiple(monkeypatch, capsys):
     code = main(["verify", "--no-network"])
     assert code == 2
     assert "multiple supported agents detected" in capsys.readouterr().err
+
+
+def test_verify_explicit_missing_builtin_fails_before_probe(monkeypatch, capsys):
+    monkeypatch.setattr("agent_boundary_check.cli.shutil.which", lambda executable: None)
+    code = main(["verify", "codex", "--no-network"])
+    assert code == 2
+    error = capsys.readouterr().err
+    assert "codex CLI is not installed or not on PATH" in error
+    assert "UNKNOWN" not in error
 
 
 def test_timeout_must_be_positive():
