@@ -3,6 +3,7 @@
 ![Agent Boundary Check](assets/social/github-social-card-agent-boundary-check.png)
 
 [![CI](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml/badge.svg)](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-boundary-check.svg)](https://pypi.org/project/agent-boundary-check/)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -86,22 +87,35 @@ The built-in adapters deliberately do not add permission-bypass, sandbox-bypass 
 
 For GUI agents or unsupported CLIs, use the manual `prepare` / `collect` flow. See [`docs/supported-agents.md`](docs/supported-agents.md).
 
-## Quick start
+## Install
 
-Create a virtual environment and install from source:
+For a standalone command-line installation, use pipx:
+
+```bash
+pipx install agent-boundary-check
+```
+
+Or install the package with pip:
+
+```bash
+python3 -m pip install agent-boundary-check
+```
+
+Then run:
+
+```bash
+agent-boundary --version
+agent-boundary agents
+```
+
+### Install from source
+
+If you prefer to install directly from the repository:
 
 ```bash
 git clone https://github.com/sylvesterkaczmarek/agent-boundary-check.git
 cd agent-boundary-check
-python3 -m venv .venv
-source .venv/bin/activate
 python3 -m pip install .
-```
-
-Check which supported agents are installed:
-
-```bash
-agent-boundary agents
 ```
 
 Run a boundary measurement:
