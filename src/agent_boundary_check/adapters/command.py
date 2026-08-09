@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 
@@ -16,7 +17,12 @@ class CommandAdapter(AgentAdapter):
         self.template = template
 
     def build_command(self, prompt: str, prompt_file: Path):
-        parts = shlex.split(self.template)
+        parts = shlex.split(self.template, posix=os.name != "nt")
+        if os.name == "nt":
+            parts = [
+                part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in {"\"", "'"} else part
+                for part in parts
+            ]
         used = False
         out: list[str] = []
         for part in parts:

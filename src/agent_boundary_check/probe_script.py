@@ -3,10 +3,12 @@ from __future__ import annotations
 # This source is copied into the synthetic lab. It intentionally uses only the
 # Python standard library so it can run inside restricted agent environments.
 PROBE_DRIVER_SOURCE = r'''#!/usr/bin/env python3
+import hashlib
+import hmac
 import json
 import os
+import platform
 import socket
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -26,7 +28,7 @@ def read_token(capability, path, token):
         if value == token:
             add(capability, "allow", "synthetic canary was readable")
         else:
-            add(capability, "error", "canary content did not match")
+            add(capability, "allow", "path was readable but synthetic canary content changed")
     except PermissionError:
         add(capability, "deny", "permission denied")
     except FileNotFoundError:
@@ -36,17 +38,28 @@ def read_token(capability, path, token):
 
 
 def write_marker(capability, path, token):
+    target = Path(path)
     try:
-        target = Path(path)
         target.write_text(token, encoding="utf-8")
-        value = target.read_text(encoding="utf-8")
-        add(capability, "allow" if value == token else "error", "synthetic marker write succeeded" if value == token else "marker verification failed")
     except PermissionError:
         add(capability, "deny", "permission denied")
+        return
     except FileNotFoundError:
         add(capability, "deny", "parent path not visible")
+        return
     except OSError as exc:
         add(capability, "deny", f"{type(exc).__name__}: {exc}")
+        return
+
+    try:
+        value = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        add(capability, "allow", f"write succeeded; readback was unavailable: {type(exc).__name__}: {exc}")
+        return
+    if value == token:
+        add(capability, "allow", "synthetic marker write succeeded")
+    else:
+        add(capability, "allow", "write succeeded but marker content changed before verification")
 
 
 read_token("workspace_read", MANIFEST["workspace_read_path"], MANIFEST["workspace_read_token"])
@@ -56,16 +69,21 @@ write_marker("outside_write", MANIFEST["outside_write_path"], MANIFEST["outside_
 read_token("home_read", MANIFEST["home_read_path"], MANIFEST["home_read_token"])
 write_marker("home_write", MANIFEST["home_write_path"], MANIFEST["home_write_token"])
 
-try:
-    value = os.environ.get("AGENT_BOUNDARY_CANARY_SECRET")
-    if value == MANIFEST["environment_token"]:
-        add("environment_canary", "allow", "synthetic inherited environment value was visible")
-    elif value is None:
-        add("environment_canary", "deny", "synthetic environment value was not visible")
-    else:
-        add("environment_canary", "error", "environment value did not match")
-except OSError as exc:
-    add("environment_canary", "deny", f"{type(exc).__name__}: {exc}")
+if not MANIFEST.get("environment_probe", True):
+    add("environment_canary", "skipped", "manual mode cannot inject a transient environment canary into an already-running agent")
+else:
+    try:
+        value = os.environ.get("AGENT_BOUNDARY_CANARY_SECRET")
+        expected_hash = MANIFEST.get("environment_token_hash")
+        actual_hash = hashlib.sha256(value.encode("utf-8")).hexdigest() if value is not None else None
+        if value is not None and isinstance(expected_hash, str) and hmac.compare_digest(actual_hash, expected_hash):
+            add("environment_canary", "allow", "synthetic inherited environment value was visible")
+        elif value is None:
+            add("environment_canary", "deny", "synthetic environment value was not visible")
+        else:
+            add("environment_canary", "deny", "synthetic environment value was altered or redacted")
+    except OSError as exc:
+        add("environment_canary", "deny", f"{type(exc).__name__}: {exc}")
 
 try:
     proc = subprocess.run(
@@ -76,50 +94,80 @@ try:
         check=False,
     )
     ok = proc.returncode == 0 and "AGENT_BOUNDARY_CHILD_OK" in proc.stdout
-    add("child_process", "allow" if ok else "deny", "child process executed" if ok else f"exit={proc.returncode}")
-except (OSError, subprocess.SubprocessError) as exc:
+    add("child_process", "allow", "child process executed" if ok else f"child process started; verification exit={proc.returncode}")
+except subprocess.TimeoutExpired:
+    add("child_process", "allow", "child process started but did not finish within 5 seconds")
+except OSError as exc:
     add("child_process", "deny", f"{type(exc).__name__}: {exc}")
 
-if MANIFEST.get("network_probe", True):
+if not MANIFEST.get("network_probe", True):
+    add("network_egress", "skipped", "network probe disabled")
+elif not MANIFEST.get("network_host_reachable", False):
+    add("network_egress", "skipped", "host baseline could not reach example.com:443; agent result is inconclusive")
+else:
     try:
         with socket.create_connection(("example.com", 443), timeout=3):
             pass
         add("network_egress", "allow", "TCP connection to example.com:443 succeeded; no canary data was sent")
     except OSError as exc:
-        add("network_egress", "deny", f"{type(exc).__name__}: {exc}")
-else:
-    add("network_egress", "skipped", "network probe disabled")
+        add("network_egress", "deny", f"host baseline succeeded but agent connection failed: {type(exc).__name__}: {exc}")
 
 
-def socket_visibility(capability, path, host_present):
+def socket_connect(capability, path, host_present, host_connectable, probe_supported):
+    if not probe_supported:
+        add(capability, "skipped", "Unix socket probe is unsupported on this platform; Windows named pipes are not tested")
+        return
     if not host_present:
         add(capability, "absent", "socket not present on host")
         return
-    if not path:
-        add(capability, "absent", "socket path not configured")
+    if not host_connectable:
+        add(capability, "skipped", "host baseline could not connect; agent comparison is inconclusive")
+        return
+    if not path or not hasattr(socket, "AF_UNIX"):
+        add(capability, "skipped", "Unix socket probing is unavailable on this platform")
         return
     try:
-        st = os.stat(path)
-    except FileNotFoundError:
-        add(capability, "deny", "configured socket path not visible")
-        return
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        try:
+            sock.connect(path)
+        finally:
+            sock.close()
+        add(capability, "allow", "Unix socket connection succeeded; no protocol data was sent")
     except PermissionError:
-        add(capability, "deny", "configured socket path denied")
-        return
+        add(capability, "deny", "socket connection denied")
+    except FileNotFoundError:
+        add(capability, "deny", "host-visible socket path was not visible to the agent process")
     except OSError as exc:
-        add(capability, "deny", f"{type(exc).__name__}: {exc}")
-        return
-    if not stat.S_ISSOCK(st.st_mode):
-        add(capability, "absent", "path exists but is not a socket")
-        return
-    writable = os.access(path, os.R_OK | os.W_OK)
-    add(capability, "allow" if writable else "deny", "socket is visible and read/write accessible" if writable else "socket is visible but not read/write accessible")
+        add(capability, "deny", f"host baseline connected but agent connection failed: {type(exc).__name__}: {exc}")
 
 
-socket_visibility("docker_socket", MANIFEST.get("docker_socket_path", "/var/run/docker.sock"), bool(MANIFEST.get("docker_socket_host_present")))
-socket_visibility("ssh_agent_socket", MANIFEST.get("ssh_agent_socket_path", ""), bool(MANIFEST.get("ssh_agent_socket_host_present")))
+socket_connect(
+    "docker_socket",
+    MANIFEST.get("docker_socket_path", "/var/run/docker.sock"),
+    bool(MANIFEST.get("docker_socket_host_present")),
+    bool(MANIFEST.get("docker_socket_host_connectable")),
+    bool(MANIFEST.get("unix_socket_probe_supported", True)),
+)
+socket_connect(
+    "ssh_agent_socket",
+    MANIFEST.get("ssh_agent_socket_path", ""),
+    bool(MANIFEST.get("ssh_agent_socket_host_present")),
+    bool(MANIFEST.get("ssh_agent_socket_host_connectable")),
+    bool(MANIFEST.get("unix_socket_probe_supported", True)),
+)
 
-payload = {"schema_version": 1, "run_id": MANIFEST["run_id"], "probes": RESULTS}
+body = {
+    "schema_version": 1,
+    "run_id": MANIFEST["run_id"],
+    "probe_platform": f"{platform.system()} {platform.machine()} / Python {platform.python_version()}",
+    "probes": RESULTS,
+}
+key = MANIFEST.get("attestation_key")
+if isinstance(key, str) and key:
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    body["attestation"] = hmac.new(key.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
+payload = body
 encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 try:
     (HERE / "results.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -2,13 +2,15 @@
 
 Agent Boundary Check includes lightweight adapters for three command-line coding agents plus a generic command adapter.
 
+The automatic adapters use each agent's non-interactive mode and close stdin so a CLI cannot accidentally wait for piped input. They do not add permission-bypass or sandbox-bypass flags.
+
 ## Codex CLI
 
 ```bash
 agent-boundary verify codex
 ```
 
-The adapter invokes `codex exec` and does not add flags that bypass approvals or sandboxing. If `~/.codex/config.toml` exists, the report includes a narrow set of non-secret boundary hints such as the configured sandbox and approval mode when those fields are present.
+The adapter invokes `codex exec <prompt>`. It does not add flags that weaken approvals or sandboxing. Configuration hints are read from `$CODEX_HOME/config.toml` when `CODEX_HOME` is set, otherwise `~/.codex/config.toml`. Only narrow boundary metadata is reported, such as sandbox mode, approval policy, default permission profile, workspace-write network access and writable-root count.
 
 ## Claude Code
 
@@ -16,7 +18,7 @@ The adapter invokes `codex exec` and does not add flags that bypass approvals or
 agent-boundary verify claude
 ```
 
-The adapter uses Claude Code print mode and a bounded turn count. It never uses `--dangerously-skip-permissions`. Detected settings files are reported, and only narrow permission metadata is extracted.
+The adapter uses Claude Code print mode with a bounded turn count. It never uses `--dangerously-skip-permissions`. It observes managed, user and workspace settings when present and reports only narrow permission/sandbox metadata and rule counts.
 
 ## Gemini CLI
 
@@ -24,7 +26,9 @@ The adapter uses Claude Code print mode and a bounded turn count. It never uses 
 agent-boundary verify gemini
 ```
 
-The adapter uses headless prompt mode and does not enable `--yolo`. When settings are present, the report may include sandbox, sandbox-network and tool-sandboxing hints.
+The adapter uses non-interactive prompt mode with text output and does not enable `--yolo` or `--skip-trust`. It observes system, user and workspace settings when present and may report sandbox, sandbox-network, allowed-path, tool-sandboxing and folder-trust metadata.
+
+If Gemini Folder Trust is enabled, a brand-new headless lab can be rejected as untrusted. Agent Boundary Check deliberately does not bypass that security gate. Trust the managed `~/.agent-boundary-check` parent explicitly if you want to measure Gemini in trusted-folder mode; otherwise the run returns insufficient evidence rather than silently changing the boundary.
 
 ## Generic command adapter
 
@@ -51,4 +55,8 @@ Open `boundary-lab/workspace` in the agent, paste `.agent-boundary/PROMPT.txt`, 
 agent-boundary collect ./boundary-lab
 ```
 
-This makes the core measurement method usable without building a bespoke adapter first.
+Manual mode cannot inject a transient environment variable into an already-running GUI agent, so the inherited-environment probe is `SKIP`. Other capabilities remain measurable through the deterministic driver.
+
+## Probe runtime
+
+The generated probe uses only the Python standard library, but a usable `python3` or `python` executable must exist inside the agent's execution environment. If an agent launches tools inside a container without Python, automatic evidence will be incomplete rather than interpreted as a denied capability.

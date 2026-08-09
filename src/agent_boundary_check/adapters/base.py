@@ -16,6 +16,20 @@ class AgentRun:
     command: list[str]
 
 
+def display_path(path: Path) -> str:
+    """Return a report-safe path, abbreviating the current home directory."""
+    try:
+        resolved = path.expanduser().resolve()
+        home = Path.home().expanduser().resolve()
+        if resolved == home:
+            return "~"
+        if home in resolved.parents:
+            return str(Path("~") / resolved.relative_to(home))
+    except OSError:
+        pass
+    return str(path)
+
+
 class AgentAdapter:
     name = "unknown"
     executable = ""
@@ -28,7 +42,14 @@ class AgentAdapter:
 
     def get_version(self) -> str | None:
         try:
-            proc = subprocess.run(self.version_command(), capture_output=True, text=True, timeout=5, check=False)
+            proc = subprocess.run(
+                self.version_command(),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
         except (OSError, subprocess.SubprocessError):
             return None
         text = (proc.stdout or proc.stderr).strip()
@@ -42,7 +63,16 @@ class AgentAdapter:
         run_env = os.environ.copy()
         run_env.update(env)
         try:
-            proc = subprocess.run(cmd, cwd=cwd, env=run_env, capture_output=True, text=True, timeout=timeout, check=False)
+            proc = subprocess.run(
+                cmd,
+                cwd=cwd,
+                env=run_env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
             return AgentRun(proc.returncode, proc.stdout, proc.stderr, False, cmd)
         except subprocess.TimeoutExpired as exc:
             stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")

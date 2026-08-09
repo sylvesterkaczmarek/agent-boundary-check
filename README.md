@@ -58,11 +58,11 @@ It currently checks:
 - read and write access to a synthetic canary under the user's home directory
 - visibility of a synthetic inherited environment value
 - child-process execution
-- outbound TCP reachability to `example.com:443`
-- visibility and read/write accessibility of the Docker socket when present
-- visibility and read/write accessibility of the configured SSH agent socket when present
+- outbound TCP reachability to `example.com:443`, compared with a host-side baseline
+- connectability of the Docker Unix socket when the host process can connect to it
+- connectability of the configured SSH-agent Unix socket when the host process can connect to it
 
-The network check opens a TCP connection only. No canary or credential data is transmitted. Use `--no-network` to skip it.
+The network check opens a TCP connection only. Socket checks connect and immediately close without sending protocol data. No canary or credential data is transmitted. Use `--no-network` to skip external network probing.
 
 ## Why this is different
 
@@ -158,7 +158,7 @@ Then collect the evidence:
 agent-boundary collect ./boundary-lab
 ```
 
-The prompt instructs the agent to run exactly one checked probe and not to request broader permissions.
+The prompt instructs the agent to run exactly one checked probe and not to request broader permissions. Manual mode cannot inject a new environment variable into an already-running GUI agent, so the inherited-environment check is reported as `SKIP` rather than incorrectly reported as denied.
 
 ## Boundary policies
 
@@ -193,28 +193,38 @@ A policy violation returns exit code `1`. Missing or unusable probe evidence ret
 Agent Boundary Check is designed to test boundaries without touching genuine secrets:
 
 1. it creates unique synthetic canaries;
-2. the agent is instructed not to inspect anything else;
-3. the probe refers only to paths and values in the generated manifest;
-4. it never uses an agent's dangerous permission-bypass flags;
-5. home-directory canaries are deleted after automatic verification or collection;
-6. raw secret values are not collected from the host.
+2. automatic labs live under `~/.agent-boundary-check/labs/`, not the operating system temporary directory, so special temp-directory permissions do not masquerade as normal outside-workspace access;
+3. the agent is instructed not to inspect anything else;
+4. the probe refers only to synthetic paths and values in the generated manifest; the raw inherited-environment token is represented there only by a one-way hash;
+5. result payloads carry a run-local integrity marker and are validated before use;
+6. it never uses an agent's dangerous permission-bypass flags;
+7. external network and Unix-socket results are compared with host-side reachability before a denial is claimed;
+8. home-directory canaries are deleted after automatic verification or collection;
+9. raw secret values are not collected from the host.
 
 See [`docs/threat-model.md`](docs/threat-model.md).
 
 ## What the result means
 
-An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means the probe process could not exercise it. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` are kept distinct so absence of evidence is not silently turned into a security claim.
+An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means the probe process could not exercise it after any required host baseline succeeded. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` are kept distinct so absence of evidence is not silently turned into a security claim.
+
+`LOW` is used only when risky capabilities were actually denied or absent. `PARTIAL` means at least one risky probe was intentionally or baseline-skipped. `UNKNOWN` means required evidence was missing or invalid.
 
 A high blast-radius rating is **not automatically a vulnerability**. Some users intentionally run agents with broad authority. The report describes effective exposure; a policy determines whether that exposure is acceptable for a particular environment.
 
 ## What this repository does not claim
 
 - It does not prove that every tool path exposed by an agent has the same permissions as the tested execution path.
+- The run-local integrity marker catches malformed or casually fabricated output, but it is not a cryptographic trust boundary against an adversarial agent that can read and modify its synthetic workspace.
 - Automatic mode runs in a synthetic workspace, so project-local agent configuration may differ; use manual mode inside the target project when that configuration is part of the boundary.
 - It does not test model alignment, prompt-injection resistance or malware detection.
 - It does not read or validate real credentials.
 - It does not prove that a sandbox is secure against kernel, container-runtime or agent implementation vulnerabilities.
 - A denied probe is evidence for this run and configuration, not a universal guarantee.
+- Running a real agent may activate hooks, plugins, MCP servers or other startup integrations already configured for that agent. Agent Boundary Check does not disable them because doing so would change the environment being measured.
+- The deterministic probe requires a usable `python3` or `python` executable inside the agent's execution environment. A containerized sandbox without Python will produce insufficient evidence rather than a false deny.
+- Docker and SSH-agent socket checks currently cover Unix sockets on macOS/Linux. Windows named pipes are reported as `SKIP`, not as absent or denied.
+- Gemini Folder Trust is not bypassed. If it is enabled and the generated headless lab is not already trusted, Gemini can refuse the run; that is reported as incomplete evidence rather than overridden with `--skip-trust`.
 
 ## Development
 

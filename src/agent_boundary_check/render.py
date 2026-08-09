@@ -24,7 +24,6 @@ FRIENDLY = {
     "network_egress": "Network egress",
     "docker_socket": "Docker socket",
     "ssh_agent_socket": "SSH agent socket",
-    "shell_probe": "Agent shell probe",
 }
 
 
@@ -33,13 +32,12 @@ def render_report(report: RunReport) -> None:
     print(f"Agent Boundary Check  {report.risk_level}")
     version = f" · {report.agent_version}" if report.agent_version else ""
     print(f"{report.agent}{version}")
-    print(report.platform)
+    print(f"Host: {report.platform}")
+    if report.probe_platform:
+        print(f"Probe: {report.probe_platform}")
     print()
 
-    rows = [
-        (FRIENDLY.get(p.capability, p.capability), SYMBOL[p.status], p.detail)
-        for p in report.probes
-    ]
+    rows = [(FRIENDLY.get(p.capability, p.capability), SYMBOL[p.status], p.detail) for p in report.probes]
     cap_width = max([len("Capability"), *(len(r[0]) for r in rows)]) if rows else len("Capability")
     state_width = max([len("Effective"), *(len(r[1]) for r in rows)]) if rows else len("Effective")
     print(f"{'Capability':<{cap_width}}  {'Effective':<{state_width}}  Evidence")
@@ -62,5 +60,5 @@ def render_report(report: RunReport) -> None:
             print(f"• {violation}")
     if report.runner_timed_out:
         print("\nAgent runner timed out before the probe completed.")
-    elif report.probes and report.probes[0].capability == "shell_probe":
-        print("\nThe agent did not produce probe evidence. Check its runner output or permissions.")
+    if report.evidence_error:
+        print(f"\nEvidence incomplete: {report.evidence_error}")
