@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-boundary-check"
+version = "0.1.0"
+description = "Verify what AI coding agents can actually read, write, execute and reach using synthetic canaries."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "Sylvester Kaczmarek"}]
+keywords = ["ai-agents", "agent-security", "sandbox", "permissions", "ai-safety", "coding-agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "build>=1.2",
+]
+
+[project.scripts]
+agent-boundary = "agent_boundary_check.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
+Repository = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
+Issues = "https://github.com/sylvesterkaczmarek/agent-boundary-check/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

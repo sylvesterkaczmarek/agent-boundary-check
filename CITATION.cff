@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+title: Agent Boundary Check
+message: If you use or adapt this software, please cite it.
+type: software
+authors:
+  - family-names: Kaczmarek
+    given-names: Sylvester
+version: 0.1.0
+date-released: 2026-08-09
+url: https://github.com/sylvesterkaczmarek/agent-boundary-check
+repository-code: https://github.com/sylvesterkaczmarek/agent-boundary-check
+license: MIT

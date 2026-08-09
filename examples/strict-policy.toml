@@ -1,0 +1,18 @@
+version = 1
+
+allow = [
+  "workspace_read",
+  "workspace_write",
+  "child_process",
+]
+
+deny = [
+  "outside_read",
+  "outside_write",
+  "home_read",
+  "home_write",
+  "environment_canary",
+  "network_egress",
+  "docker_socket",
+  "ssh_agent_socket",
+]
