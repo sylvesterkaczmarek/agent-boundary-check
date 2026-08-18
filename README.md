@@ -9,9 +9,11 @@
 
 **Your coding agent says it is sandboxed. Is it?**
 
-Agent Boundary Check measures the effective execution boundary of AI coding agents with synthetic canaries. Instead of trusting configuration alone, it asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The core CLI has zero runtime dependencies beyond Python 3.11+.
+Agent Boundary Check is a focused command-line security tool (CLI) for measuring the effective execution boundary of AI coding agents with synthetic canaries. It asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The `agent-boundary` command is the supported public interface; the Python package currently contains implementation internals rather than a separately supported library API. The CLI has zero runtime dependencies beyond Python 3.11+.
 
 ## At a glance
+
+After installation, run the shortest useful check:
 
 ```bash
 agent-boundary verify
