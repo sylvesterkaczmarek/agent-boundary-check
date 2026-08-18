@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,9 +40,10 @@ def test_gemini_command_does_not_use_yolo():
 
 def test_custom_command_substitutes_prompt_and_file():
     adapter = CommandAdapter('runner --prompt "{prompt}" --file {prompt_file}')
-    cmd = adapter.build_command("hello world", Path("/tmp/prompt.txt"))
+    prompt_file = Path("/tmp/prompt.txt")
+    cmd = adapter.build_command("hello world", prompt_file)
     assert "hello world" in cmd
-    assert "/tmp/prompt.txt" in cmd
+    assert str(prompt_file) in cmd
 
 
 def test_command_requires_template():
@@ -69,7 +71,7 @@ def test_codex_respects_codex_home_for_config(tmp_path, monkeypatch):
     (home / "config.toml").write_text('sandbox_mode = "workspace-write"\napproval_policy = "on-request"\ndefault_permissions = "repo-safe"\n[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = ["/x"]\n')
     monkeypatch.setenv("CODEX_HOME", str(home))
     hints = CodexAdapter().declared_hints(tmp_path)
-    assert hints["config_file"] == str(home / "config.toml")
+    assert hints["config_file"] == display_path(home / "config.toml")
     assert hints["approval_policy"] == "on-request"
     assert hints["default_permissions"] == "repo-safe"
     assert hints["workspace_write_network_access"] is True
@@ -113,7 +115,7 @@ def test_display_path_abbreviates_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    assert display_path(home / ".claude" / "settings.json") == "~/.claude/settings.json"
+    assert display_path(home / ".claude" / "settings.json") == str(Path("~") / ".claude" / "settings.json")
 
 
 def test_gemini_honors_configuration_path_overrides(tmp_path, monkeypatch):
@@ -132,9 +134,9 @@ def test_gemini_honors_configuration_path_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("SANDBOX_MOUNTS", "/one:ro,/two:rw")
 
     hints = GeminiAdapter().declared_hints(tmp_path)
-    assert str(defaults) in hints["config_files"]
-    assert str(system) in hints["config_files"]
-    assert str(user) in hints["config_files"]
+    assert display_path(defaults) in hints["config_files"]
+    assert display_path(system) in hints["config_files"]
+    assert display_path(user) in hints["config_files"]
     assert hints["environment_sandbox"] == "docker"
     assert hints["sandbox_mount_count"] == 2
     assert any(item.get("default_approval_mode") == "plan" for item in hints["sandbox_settings"])
@@ -154,7 +156,7 @@ def test_claude_counts_additional_directories(tmp_path, monkeypatch):
 def test_custom_command_windows_style_quoted_executable(monkeypatch):
     import agent_boundary_check.adapters.command as command_module
 
-    monkeypatch.setattr(command_module.os, "name", "nt")
+    monkeypatch.setattr(command_module, "os", SimpleNamespace(name="nt"))
     adapter = CommandAdapter(r'"C:\Program Files\Python\python.exe" script.py "{prompt}"')
     cmd = adapter.build_command("hello world", Path(r"C:\tmp\prompt.txt"))
     assert cmd[0] == r"C:\Program Files\Python\python.exe"
@@ -169,7 +171,7 @@ def test_claude_ignores_non_object_and_invalid_utf8_settings(tmp_path, monkeypat
     settings.write_bytes(b"\xff\xfe")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     hints = ClaudeAdapter().declared_hints(tmp_path)
-    assert hints["config_files"] == ["~/.claude/settings.json"]
+    assert hints["config_files"] == [display_path(settings)]
 
     settings.write_text("[]")
     hints = ClaudeAdapter().declared_hints(tmp_path)
@@ -183,7 +185,7 @@ def test_gemini_ignores_non_object_and_invalid_utf8_settings(tmp_path, monkeypat
     settings.write_bytes(b"\xff\xfe")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     hints = GeminiAdapter().declared_hints(tmp_path)
-    assert "~/.gemini/settings.json" in hints["config_files"]
+    assert display_path(settings) in hints["config_files"]
 
     settings.write_text("[]")
     hints = GeminiAdapter().declared_hints(tmp_path)
