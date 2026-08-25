@@ -18,8 +18,12 @@ jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -27,9 +31,10 @@ jobs:
           cache: pip
 
       - name: Install build tooling
-        run: python -m pip install --upgrade build
+        run: python -m pip install --upgrade build twine
 
       - name: Verify release version
+        id: version
         shell: bash
         run: |
           PACKAGE_VERSION="$(python - <<'PY'
@@ -45,9 +50,13 @@ jobs:
             echo ".release-version (${RELEASE_VERSION}) does not match package version (${PACKAGE_VERSION})"
             exit 1
           }
+          echo "version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build wheel and source distribution
         run: python -m build
+
+      - name: Validate distributions
+        run: python -m twine check dist/*
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
@@ -76,9 +85,58 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  verify-pypi:
+    name: Verify public PyPI install (Python ${{ matrix.python-version }})
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install released package from public PyPI
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if python -m pip install --no-cache-dir --index-url https://pypi.org/simple "agent-boundary-check==${VERSION}"; then
+              break
+            fi
+            if [[ "$attempt" -eq 12 ]]; then
+              echo "agent-boundary-check ${VERSION} was not installable from public PyPI." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          python -m pip check
+
+      - name: Smoke test released package
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          cd "$tmpdir"
+          agent-boundary --version
+          agent-boundary demo --json agent-boundary-pypi-smoke.json
+          test -s agent-boundary-pypi-smoke.json
+          python - <<'PY'
+          import os
+          from importlib.metadata import version
+
+          assert version("agent-boundary-check") == os.environ["VERSION"]
+          PY
+
   tag:
     name: Tag published version
-    needs: publish
+    needs: [build, publish, verify-pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,9 +146,10 @@ jobs:
           fetch-depth: 0
 
       - name: Create release tag
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
-          VERSION="$(tr -d '[:space:]' < .release-version)"
           TAG="v${VERSION}"
           if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "${TAG} already exists"
