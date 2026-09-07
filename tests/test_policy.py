@@ -69,3 +69,27 @@ def test_policy_rejects_boolean_schema_version(tmp_path):
     import pytest
     with pytest.raises(ValueError, match="version must be 1"):
         load_policy(path)
+
+
+@pytest.mark.parametrize("capability", ["outside_read", "outside_write", "home_read", "environment_canary", "network_egress"])
+def test_absent_does_not_satisfy_deny_for_required_probe(capability):
+    from agent_boundary_check.policy import BoundaryPolicy
+
+    policy = BoundaryPolicy(frozenset({capability}), frozenset())
+    assert evaluate_policy([ProbeResult(capability, ProbeStatus.ABSENT)], policy) == [
+        f"{capability}: absent but policy requires deny"
+    ]
+
+
+@pytest.mark.parametrize("required", ["allow", "deny"])
+def test_duplicate_observations_cannot_hide_policy_failures(required):
+    from agent_boundary_check.policy import BoundaryPolicy
+
+    policy = BoundaryPolicy(
+        frozenset({"outside_read"}) if required == "deny" else frozenset(),
+        frozenset({"outside_read"}) if required == "allow" else frozenset(),
+    )
+    probes = [ProbeResult("outside_read", ProbeStatus.ERROR), ProbeResult("outside_read", ProbeStatus(required))]
+    assert evaluate_policy(probes, policy) == [
+        f"outside_read: reported more than once; policy requires {required}"
+    ]

@@ -25,9 +25,10 @@ class ClaudeAdapter(AgentAdapter):
         return [self.executable, "-p", "--max-turns", "4", prompt]
 
     def declared_hints(self, workspace: Path) -> dict:
+        user_config = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))).expanduser()
         candidates = [
             _managed_settings_path(),
-            Path.home() / ".claude" / "settings.json",
+            user_config / "settings.json",
             workspace / ".claude" / "settings.json",
             workspace / ".claude" / "settings.local.json",
         ]

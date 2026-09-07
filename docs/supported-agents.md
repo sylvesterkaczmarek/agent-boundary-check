@@ -4,6 +4,8 @@ Agent Boundary Check includes lightweight adapters for three command-line coding
 
 The automatic adapters use each agent's non-interactive mode and close stdin so a CLI cannot accidentally wait for piped input. They do not add permission-bypass or sandbox-bypass flags.
 
+On POSIX systems, each runner owns a separate process group, which is stopped on timeout, interruption or runner exit. Windows cleanup uses the runner's process tree where available; detached children or children whose parent has already exited may survive. This is process-lifecycle cleanup, not an additional sandbox. Invalid output bytes are decoded with replacement, and failed version commands are omitted from version metadata.
+
 ## Codex CLI
 
 ```bash
@@ -19,6 +21,8 @@ agent-boundary verify claude
 ```
 
 The adapter uses Claude Code print mode with a bounded turn count. It never uses `--dangerously-skip-permissions`. It observes managed, user and workspace settings when present and reports only narrow permission/sandbox metadata and rule counts.
+
+User settings are read from `CLAUDE_CONFIG_DIR/settings.json` when configured, otherwise `~/.claude/settings.json`.
 
 ## Gemini CLI
 
@@ -40,6 +44,8 @@ agent-boundary verify command \
 ```
 
 The placeholders `{prompt}` and `{prompt_file}` are supported. If neither is present, the prompt is appended as the final argument. The command is split into arguments and executed directly; it is not passed through a shell.
+
+POSIX command templates use shell-style quoting for argument splitting. Windows templates use double quotes and Windows backslash rules; single quotes are literal characters. Placeholders are expanded once after splitting, so spaces or placeholder-like text inside the generated prompt remain part of the intended argument.
 
 ## GUI and unsupported agents
 

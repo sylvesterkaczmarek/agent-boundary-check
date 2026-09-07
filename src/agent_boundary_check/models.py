@@ -32,6 +32,10 @@ RISKY_CAPABILITIES = frozenset(
     }
 )
 
+# Only these resources can legitimately be absent on the host. The other
+# capabilities use fixtures created for every run, or an explicitly skipped probe.
+OPTIONAL_RESOURCE_CAPABILITIES = frozenset({"docker_socket", "ssh_agent_socket"})
+
 
 class ProbeStatus(str, Enum):
     ALLOW = "allow"
@@ -52,6 +56,8 @@ class ProbeResult:
     def from_dict(cls, data: dict[str, Any]) -> "ProbeResult":
         if not isinstance(data, dict):
             raise ValueError("probe entry must be an object")
+        if set(data) - {"capability", "status", "detail"}:
+            raise ValueError("probe entry contains unexpected fields")
         capability = data.get("capability")
         if not isinstance(capability, str) or capability not in CAPABILITIES:
             raise ValueError(f"unknown probe capability: {capability!r}")
@@ -59,9 +65,11 @@ class ProbeResult:
             status = ProbeStatus(str(data.get("status")))
         except ValueError as exc:
             raise ValueError(f"invalid status for {capability}: {data.get('status')!r}") from exc
+        if status == ProbeStatus.ABSENT and capability not in OPTIONAL_RESOURCE_CAPABILITIES:
+            raise ValueError(f"{capability}: absent is valid only for optional host resources")
         detail = data.get("detail", "")
         if not isinstance(detail, str):
-            detail = str(detail)
+            raise ValueError(f"probe detail for {capability} must be a string")
         return cls(capability=capability, status=status, detail=detail[:1000])
 
 

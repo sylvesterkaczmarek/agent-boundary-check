@@ -146,7 +146,7 @@ Compare reports after an agent upgrade or configuration change:
 agent-boundary diff boundary-before.json boundary-after.json
 ```
 
-A newly allowed high-risk capability is marked `NEW EXPOSURE` and returns exit code `1`.
+A newly allowed high-risk capability is marked `NEW EXPOSURE` and returns exit code `1`, as does a policy violation in the newer report. Invalid or incomplete evidence in either report, a failed runner, or a previously measured check becoming skipped returns `2`. Unchanged intentional skips remain visible. See [comparison guidance](docs/reproducibility.md).
 
 Skip the external network probe:
 
@@ -175,6 +175,10 @@ agent-boundary collect ./boundary-lab
 ```
 
 The prompt instructs the agent to run exactly one checked probe and not to request broader permissions. Manual mode cannot inject a new environment variable into an already-running GUI agent, so the inherited-environment check is reported as `SKIP` rather than incorrectly reported as denied.
+
+Prepare a fresh lab for each measurement. Probe writes use exclusive creation to preserve existing files, so reusing a completed lab produces errors rather than overwriting earlier evidence. Collecting before usable evidence exists returns `2` and preserves the home canary so the first measurement can still run. Successful collection removes only home canaries whose ownership marker matches that lab; the prepared workspace remains available for inspection. Labs prepared by older versions without that marker need manual home-canary removal or a fresh `prepare`.
+
+Use a separate filename for `--json`. Report output cannot replace the policy, probe driver, manifest, raw results or synthetic canaries. Reports are replaced atomically so a failed write preserves an existing report.
 
 ## Boundary policies
 
@@ -215,16 +219,16 @@ Agent Boundary Check is designed to test boundaries without touching genuine sec
 5. result payloads carry a run-local integrity marker and are validated before use;
 6. it never uses an agent's dangerous permission-bypass flags;
 7. external network and Unix-socket results are compared with host-side reachability before a denial is claimed;
-8. home-directory canaries are deleted after automatic verification or collection;
+8. home-directory canaries are removed after automatic verification or successful collection, with ownership checks before cleanup;
 9. raw secret values are not collected from the host.
 
 See [`docs/threat-model.md`](docs/threat-model.md).
 
 ## What the result means
 
-An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means the probe process could not exercise it after any required host baseline succeeded. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` are kept distinct so absence of evidence is not silently turned into a security claim.
+An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means explicit permission rejection or an inaccessible/missing synthetic path after any required host baseline succeeded. A missing path can be hidden by a sandbox or removed by another process; the observation alone does not establish the cause. Connection timeouts, DNS failures, refused connections and unexpected resource errors are inconclusive and reported as `ERROR`. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` remain distinct.
 
-`LOW` is used only when risky capabilities were actually denied or absent. `PARTIAL` means at least one risky probe was intentionally or baseline-skipped. `UNKNOWN` means required evidence was missing or invalid.
+`LOW` requires complete evidence with risky capabilities denied, or optional Unix sockets absent. Mandatory synthetic checks cannot claim `N/A`. `PARTIAL` means at least one risky probe was intentionally or baseline-skipped. Missing or invalid evidence produces `UNKNOWN` when no exposure was observed; a known exposure keeps its higher risk rating alongside an incomplete-evidence warning and exit code `2`.
 
 A high blast-radius rating is **not automatically a vulnerability**. Some users intentionally run agents with broad authority. The report describes effective exposure; a policy determines whether that exposure is acceptable for a particular environment.
 
@@ -232,7 +236,7 @@ A high blast-radius rating is **not automatically a vulnerability**. Some users 
 
 - It does not prove that every tool path exposed by an agent has the same permissions as the tested execution path.
 - The run-local integrity marker catches malformed or casually fabricated output, but it is not a cryptographic trust boundary against an adversarial agent that can read and modify its synthetic workspace.
-- Automatic mode runs in a synthetic workspace, so project-local agent configuration may differ; use manual mode inside the target project when that configuration is part of the boundary.
+- Both automatic and prepared manual labs use a synthetic workspace. Project-local settings are not copied automatically; configure the generated workspace to match the intended project and check the agent's effective settings before drawing project-specific conclusions.
 - It does not test model alignment, prompt-injection resistance or malware detection.
 - It does not read or validate real credentials.
 - It does not prove that a sandbox is secure against kernel, container-runtime or agent implementation vulnerabilities.
@@ -240,6 +244,7 @@ A high blast-radius rating is **not automatically a vulnerability**. Some users 
 - Running a real agent may activate hooks, plugins, MCP servers or other startup integrations already configured for that agent. Agent Boundary Check does not disable them because doing so would change the environment being measured.
 - The deterministic probe requires a usable `python3` or `python` executable inside the agent's execution environment. A containerized sandbox without Python will produce insufficient evidence rather than a false deny.
 - Docker and SSH-agent socket checks currently cover Unix sockets on macOS/Linux. Windows named pipes are reported as `SKIP`, not as absent or denied.
+- An explicit TCP, SSH or other non-Unix `DOCKER_HOST` is outside the Docker Unix-socket check. It does not cause probing of an unrelated local socket, and `N/A` for that check says nothing about remote Docker access.
 - Gemini Folder Trust is not bypassed. If it is enabled and the generated headless lab is not already trusted, Gemini can refuse the run; that is reported as incomplete evidence rather than overridden with `--skip-trust`.
 
 ## Development

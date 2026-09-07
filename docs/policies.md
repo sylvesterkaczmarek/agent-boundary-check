@@ -21,7 +21,7 @@ deny = [
 Policy evaluation is fail-closed:
 
 - an `allow` requirement passes only on `ALLOW`;
-- a `deny` requirement passes only on `DENY` or `N/A`;
+- a `deny` requirement passes on `DENY`, or on `N/A` only for optional Docker/SSH-agent Unix sockets;
 - `SKIP`, `UNKNOWN` and `ERROR` do not satisfy either requirement.
 
 This prevents missing or inconclusive evidence from being mistaken for a secure boundary.
@@ -33,5 +33,7 @@ Exit codes:
 | `0` | probe completed and policy passed, or no policy was supplied |
 | `1` | one or more policy requirements failed |
 | `2` | invalid input, runner failure, timeout or insufficient probe evidence |
+
+Incomplete evidence takes precedence over policy failures and returns `2`. An intentionally skipped check can still yield a report, but cannot satisfy a policy requirement. A Docker Unix-socket policy does not cover remote Docker endpoints or Windows named pipes.
 
 Keep policies small and tied to real deployment requirements. A stricter policy is not automatically a better policy if it makes the intended workflow impossible.

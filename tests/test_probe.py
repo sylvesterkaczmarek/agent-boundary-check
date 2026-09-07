@@ -1,10 +1,15 @@
+import errno
 import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from agent_boundary_check.lab import create_lab
+from agent_boundary_check.probe_script import PROBE_DRIVER_SOURCE
 from agent_boundary_check.report import make_report, parse_probe_payload
 
 
@@ -179,3 +184,179 @@ def test_changed_canary_content_still_proves_read_access(tmp_path, monkeypatch):
     assert outside["status"] == "allow"
     assert "content changed" in outside["detail"]
     lab.cleanup_home_canary()
+
+
+@pytest.fixture
+def synthetic_lab(tmp_path, monkeypatch):
+    fake_home = tmp_path / "probe-home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr("agent_boundary_check.lab._unix_socket_connectable", lambda *args, **kwargs: False)
+    lab = create_lab(tmp_path / "probe-lab", network_probe=False)
+    monkeypatch.setenv("AGENT_BOUNDARY_CANARY_SECRET", lab.environment_token)
+    yield lab
+    lab.cleanup_home_canary()
+
+
+def _run_driver(lab, monkeypatch, capsys, *, child_error=None):
+    def run_child(*args, **kwargs):
+        if child_error is not None:
+            raise child_error
+        return subprocess.CompletedProcess(args[0], 0, "AGENT_BOUNDARY_CHILD_OK\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run_child)
+    exec(PROBE_DRIVER_SOURCE, {"__file__": str(lab.manifest_path.parent / "probe_driver.py")})
+    output = capsys.readouterr().out
+    payload = parse_probe_payload(lab.results_path, output)
+    assert payload is not None
+    return {probe["capability"]: probe for probe in payload["probes"]}
+
+
+def _update_manifest(lab, **values):
+    manifest = json.loads(lab.manifest_path.read_text(encoding="utf-8"))
+    manifest.update(values)
+    lab.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_non_utf8_canary_still_proves_read_access(synthetic_lab, monkeypatch, capsys):
+    manifest = json.loads(synthetic_lab.manifest_path.read_text(encoding="utf-8"))
+    Path(manifest["outside_read_path"]).write_bytes(b"\xff\x80")
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes["outside_read"]["status"] == "allow"
+    assert "content changed" in probes["outside_read"]["detail"]
+    assert len(probes) == 11
+
+
+@pytest.mark.parametrize("error", [OSError(errno.EIO, "I/O failure"), OSError(errno.EMFILE, "too many files")])
+@pytest.mark.parametrize("capability", ["workspace_read", "outside_write"])
+def test_filesystem_infrastructure_failure_is_not_denial(synthetic_lab, monkeypatch, capsys, error, capability):
+    manifest = json.loads(synthetic_lab.manifest_path.read_text(encoding="utf-8"))
+    target = Path(manifest[f"{capability}_path"])
+    original_open = Path.open
+
+    def failing_open(path, *args, **kwargs):
+        if path == target:
+            raise error
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", failing_open)
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes[capability]["status"] == "error"
+    assert probes["home_read"]["status"] == "allow"
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError(errno.ENOENT, "interpreter missing"), OSError(errno.ENOEXEC, "bad executable")])
+def test_unavailable_child_interpreter_is_not_denial(synthetic_lab, monkeypatch, capsys, error):
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys, child_error=error)
+    assert probes["child_process"]["status"] == "error"
+
+
+def test_child_permission_failure_is_denial(synthetic_lab, monkeypatch, capsys):
+    probes = _run_driver(
+        synthetic_lab, monkeypatch, capsys, child_error=PermissionError(errno.EACCES, "execution denied")
+    )
+    assert probes["child_process"]["status"] == "deny"
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timed out"), ConnectionRefusedError("service unavailable"), socket.gaierror("DNS unavailable")])
+def test_network_failure_without_permission_denial_is_inconclusive(synthetic_lab, monkeypatch, capsys, error):
+    _update_manifest(synthetic_lab, network_probe=True, network_host_reachable=True)
+
+    def fail_connection(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(socket, "create_connection", fail_connection)
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes["network_egress"]["status"] == "error"
+    assert "without an explicit permission denial" in probes["network_egress"]["detail"]
+
+
+def test_network_permission_failure_is_denial(synthetic_lab, monkeypatch, capsys):
+    _update_manifest(synthetic_lab, network_probe=True, network_host_reachable=True)
+
+    def fail_connection(*args, **kwargs):
+        raise PermissionError(errno.EPERM, "denied")
+
+    monkeypatch.setattr(socket, "create_connection", fail_connection)
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes["network_egress"]["status"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "error,status",
+    [(ConnectionRefusedError("service stopped"), "error"), (TimeoutError("timed out"), "error"), (PermissionError("denied"), "deny")],
+)
+def test_socket_failure_distinguishes_infrastructure_from_denial(synthetic_lab, monkeypatch, capsys, error, status):
+    _update_manifest(
+        synthetic_lab,
+        unix_socket_probe_supported=True,
+        docker_socket_path="/synthetic/docker.sock",
+        docker_socket_host_present=True,
+        docker_socket_host_connectable=True,
+    )
+    closed = []
+
+    class FailingSocket:
+        def settimeout(self, timeout):
+            pass
+
+        def connect(self, path):
+            assert path == "/synthetic/docker.sock"
+            raise error
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(socket, "AF_UNIX", 1, raising=False)
+    monkeypatch.setattr(socket, "socket", lambda *args: FailingSocket())
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes["docker_socket"]["status"] == status
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("target_kind", ["file", "symlink"])
+def test_marker_never_overwrites_existing_file(synthetic_lab, monkeypatch, capsys, target_kind):
+    manifest = json.loads(synthetic_lab.manifest_path.read_text(encoding="utf-8"))
+    marker = Path(manifest["outside_write_path"])
+    original = synthetic_lab.root / "unrelated.txt"
+    original.write_text("keep this content", encoding="utf-8")
+    if target_kind == "symlink":
+        try:
+            marker.symlink_to(original)
+        except OSError:
+            pytest.skip("symlink creation is unavailable")
+    else:
+        marker.write_text("keep this content", encoding="utf-8")
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes["outside_write"]["status"] == "error"
+    assert marker.read_text(encoding="utf-8") == "keep this content"
+    assert original.read_text(encoding="utf-8") == "keep this content"
+
+
+def test_results_do_not_overwrite_symlink_target(synthetic_lab, monkeypatch, capsys):
+    original = synthetic_lab.root / "unrelated.txt"
+    original.write_text("keep this content", encoding="utf-8")
+    try:
+        synthetic_lab.results_path.symlink_to(original)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert len(probes) == 11
+    assert original.read_text(encoding="utf-8") == "keep this content"
+
+
+@pytest.mark.parametrize("expected_hash", [None, "redacted", "é" * 64])
+def test_invalid_environment_hash_is_error_not_denial(synthetic_lab, monkeypatch, capsys, expected_hash):
+    _update_manifest(synthetic_lab, environment_token_hash=expected_hash)
+    probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert probes["environment_canary"]["status"] == "error"
+
+
+def test_repeated_execution_requires_fresh_lab(synthetic_lab, monkeypatch, capsys):
+    original_probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert original_probes["workspace_write"]["status"] == "allow"
+    original_results = synthetic_lab.results_path.read_bytes()
+    repeated_probes = _run_driver(synthetic_lab, monkeypatch, capsys)
+    assert repeated_probes["workspace_write"]["status"] == "error"
+    assert "fresh lab" in repeated_probes["workspace_write"]["detail"]
+    assert synthetic_lab.results_path.read_bytes() == original_results
