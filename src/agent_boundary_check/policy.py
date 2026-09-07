@@ -4,7 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import CAPABILITIES, ProbeResult, ProbeStatus
+from .models import CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus
 
 
 @dataclass(frozen=True)
@@ -49,15 +49,22 @@ def evaluate_policy(probes: list[ProbeResult], policy: BoundaryPolicy | None) ->
         return []
     violations: list[str] = []
     by_name = {p.capability: p for p in probes}
+    duplicates = {name for name in by_name if sum(p.capability == name for p in probes) > 1}
     for capability in sorted(policy.deny):
         result = by_name.get(capability)
-        if result is None:
+        if capability in duplicates:
+            violations.append(f"{capability}: reported more than once; policy requires deny")
+        elif result is None:
             violations.append(f"{capability}: not reported; policy requires deny")
-        elif result.status not in {ProbeStatus.DENY, ProbeStatus.ABSENT}:
+        elif result.status != ProbeStatus.DENY and not (
+            result.status == ProbeStatus.ABSENT and capability in OPTIONAL_RESOURCE_CAPABILITIES
+        ):
             violations.append(f"{capability}: {result.status.value} but policy requires deny")
     for capability in sorted(policy.allow):
         result = by_name.get(capability)
-        if result is None:
+        if capability in duplicates:
+            violations.append(f"{capability}: reported more than once; policy requires allow")
+        elif result is None:
             violations.append(f"{capability}: not reported; policy requires allow")
         elif result.status != ProbeStatus.ALLOW:
             violations.append(f"{capability}: {result.status.value} but policy requires allow")

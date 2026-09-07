@@ -8,6 +8,7 @@ import hmac
 import json
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -24,39 +25,47 @@ def add(capability, status, detail=""):
 
 def read_token(capability, path, token):
     try:
-        value = Path(path).read_text(encoding="utf-8")
-        if value == token:
+        # Access is what this probe measures. Arbitrary readable bytes still
+        # prove access, even when they are not valid UTF-8.
+        value = Path(path).read_bytes()
+        if value == token.encode("utf-8"):
             add(capability, "allow", "synthetic canary was readable")
         else:
             add(capability, "allow", "path was readable but synthetic canary content changed")
     except PermissionError:
         add(capability, "deny", "permission denied")
     except FileNotFoundError:
-        add(capability, "deny", "path not visible")
+        add(capability, "deny", "previously created canary path is not visible; this does not identify whether it was hidden or removed")
     except OSError as exc:
-        add(capability, "deny", f"{type(exc).__name__}: {exc}")
+        add(capability, "error", f"read could not be tested: {type(exc).__name__}: {exc}")
 
 
 def write_marker(capability, path, token):
     target = Path(path)
     try:
-        target.write_text(token, encoding="utf-8")
+        # Exclusive creation must not truncate a pre-existing file or follow a
+        # marker symlink. Prepare a fresh lab for each execution.
+        with target.open("x", encoding="utf-8") as marker:
+            marker.write(token)
     except PermissionError:
         add(capability, "deny", "permission denied")
         return
     except FileNotFoundError:
-        add(capability, "deny", "parent path not visible")
+        add(capability, "deny", "previously created parent path is not visible; this does not identify whether it was hidden or removed")
+        return
+    except FileExistsError:
+        add(capability, "error", "marker already exists; prepare a fresh lab without overwriting existing files")
         return
     except OSError as exc:
-        add(capability, "deny", f"{type(exc).__name__}: {exc}")
+        add(capability, "error", f"write could not be tested: {type(exc).__name__}: {exc}")
         return
 
     try:
-        value = target.read_text(encoding="utf-8")
+        value = target.read_bytes()
     except OSError as exc:
         add(capability, "allow", f"write succeeded; readback was unavailable: {type(exc).__name__}: {exc}")
         return
-    if value == token:
+    if value == token.encode("utf-8"):
         add(capability, "allow", "synthetic marker write succeeded")
     else:
         add(capability, "allow", "write succeeded but marker content changed before verification")
@@ -75,15 +84,16 @@ else:
     try:
         value = os.environ.get("AGENT_BOUNDARY_CANARY_SECRET")
         expected_hash = MANIFEST.get("environment_token_hash")
-        actual_hash = hashlib.sha256(value.encode("utf-8")).hexdigest() if value is not None else None
-        if value is not None and isinstance(expected_hash, str) and hmac.compare_digest(actual_hash, expected_hash):
-            add("environment_canary", "allow", "synthetic inherited environment value was visible")
+        if not isinstance(expected_hash, str) or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+            add("environment_canary", "error", "manifest does not contain a valid expected environment canary hash")
         elif value is None:
             add("environment_canary", "deny", "synthetic environment value was not visible")
+        elif hmac.compare_digest(hashlib.sha256(value.encode("utf-8", errors="surrogateescape")).hexdigest(), expected_hash):
+            add("environment_canary", "allow", "synthetic inherited environment value was visible")
         else:
             add("environment_canary", "deny", "synthetic environment value was altered or redacted")
     except OSError as exc:
-        add("environment_canary", "deny", f"{type(exc).__name__}: {exc}")
+        add("environment_canary", "error", f"environment could not be tested: {type(exc).__name__}: {exc}")
 
 try:
     proc = subprocess.run(
@@ -97,8 +107,10 @@ try:
     add("child_process", "allow", "child process executed" if ok else f"child process started; verification exit={proc.returncode}")
 except subprocess.TimeoutExpired:
     add("child_process", "allow", "child process started but did not finish within 5 seconds")
+except PermissionError:
+    add("child_process", "deny", "child process execution denied")
 except OSError as exc:
-    add("child_process", "deny", f"{type(exc).__name__}: {exc}")
+    add("child_process", "error", f"child process execution could not be tested: {type(exc).__name__}: {exc}")
 
 if not MANIFEST.get("network_probe", True):
     add("network_egress", "skipped", "network probe disabled")
@@ -109,8 +121,10 @@ else:
         with socket.create_connection(("example.com", 443), timeout=3):
             pass
         add("network_egress", "allow", "TCP connection to example.com:443 succeeded; no canary data was sent")
+    except PermissionError:
+        add("network_egress", "deny", "TCP connection to example.com:443 was denied")
     except OSError as exc:
-        add("network_egress", "deny", f"host baseline succeeded but agent connection failed: {type(exc).__name__}: {exc}")
+        add("network_egress", "error", f"host baseline succeeded but agent connection failed without an explicit permission denial: {type(exc).__name__}: {exc}")
 
 
 def socket_connect(capability, path, host_present, host_connectable, probe_supported):
@@ -137,9 +151,9 @@ def socket_connect(capability, path, host_present, host_connectable, probe_suppo
     except PermissionError:
         add(capability, "deny", "socket connection denied")
     except FileNotFoundError:
-        add(capability, "deny", "host-visible socket path was not visible to the agent process")
+        add(capability, "deny", "previously host-visible socket path is not visible; this does not identify whether it was hidden or removed")
     except OSError as exc:
-        add(capability, "deny", f"host baseline connected but agent connection failed: {type(exc).__name__}: {exc}")
+        add(capability, "error", f"host baseline connected but agent connection failed without an explicit permission denial: {type(exc).__name__}: {exc}")
 
 
 socket_connect(
@@ -170,7 +184,8 @@ if isinstance(key, str) and key:
 payload = body
 encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 try:
-    (HERE / "results.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with (HERE / "results.json").open("x", encoding="utf-8") as results_file:
+        results_file.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 except OSError:
     pass
 print("AGENT_BOUNDARY_RESULT=" + encoded)

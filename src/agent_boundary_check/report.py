@@ -4,10 +4,11 @@ import hashlib
 import hmac
 import json
 import platform
+import re
 from pathlib import Path
 from typing import Any
 
-from .models import CAPABILITIES, RISKY_CAPABILITIES, ProbeResult, ProbeStatus, RunReport
+from .models import CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus, RunReport
 from .policy import BoundaryPolicy, evaluate_policy
 
 RESULT_PREFIX = "AGENT_BOUNDARY_RESULT="
@@ -26,7 +27,43 @@ RISK = {
 _ALLOWED_TOP_LEVEL = {"schema_version", "run_id", "probe_platform", "probes", "attestation"}
 
 
-def parse_probe_payload(results_path: Path, stdout: str) -> dict | None:
+def _parse_probe_output(output: str) -> tuple[bool, dict | None]:
+    decoder = json.JSONDecoder()
+    latest = None
+    saw_marker = False
+    cursor = 0
+    while (index := output.find(RESULT_PREFIX, cursor)) >= 0:
+        saw_marker = True
+        # Even a malformed current result supersedes older evidence. Falling
+        # back to a prior successful result would conceal a failed execution.
+        latest = None
+        cursor = index + len(RESULT_PREFIX)
+        while cursor < len(output) and output[cursor].isspace():
+            cursor += 1
+        try:
+            # Advance past the complete object, so marker text inside a probe
+            # detail cannot be mistaken for a newer result.
+            data, cursor = decoder.raw_decode(output, cursor)
+            if isinstance(data, dict):
+                latest = data
+        except json.JSONDecodeError:
+            continue
+    return saw_marker, latest
+
+
+def parse_probe_payload(results_path: Path, stdout: str, *, stderr: str = "") -> dict | None:
+    # The process result belongs to the current execution. A retained result
+    # file can belong to an earlier execution, especially when a write failed.
+    stdout_marker, stdout_payload = _parse_probe_output(stdout)
+    stderr_marker, stderr_payload = _parse_probe_output(stderr)
+    if stdout_marker and stderr_marker:
+        # Separately captured streams have no shared chronological order.
+        # Conflicting or malformed results cannot establish the current state.
+        return stdout_payload if stdout_payload == stderr_payload else None
+    if stdout_marker:
+        return stdout_payload
+    if stderr_marker:
+        return stderr_payload
     if results_path.exists():
         try:
             data = json.loads(results_path.read_text(encoding="utf-8"))
@@ -34,23 +71,6 @@ def parse_probe_payload(results_path: Path, stdout: str) -> dict | None:
                 return data
         except (OSError, UnicodeError, json.JSONDecodeError):
             pass
-
-    for line in reversed(stdout.splitlines()):
-        if line.startswith(RESULT_PREFIX):
-            try:
-                data = json.loads(line[len(RESULT_PREFIX) :])
-                return data if isinstance(data, dict) else None
-            except json.JSONDecodeError:
-                continue
-
-    idx = stdout.rfind(RESULT_PREFIX)
-    if idx >= 0:
-        text = stdout[idx + len(RESULT_PREFIX) :].lstrip()
-        try:
-            data, _ = json.JSONDecoder().raw_decode(text)
-            return data if isinstance(data, dict) else None
-        except json.JSONDecodeError:
-            return None
     return None
 
 
@@ -67,6 +87,8 @@ def _validate_payload(
 ) -> tuple[list[ProbeResult], str | None, str | None]:
     if payload is None:
         return _unknown_probes("probe result was not produced"), None, "probe result was not produced"
+    if not isinstance(payload, dict):
+        return _unknown_probes("probe payload was invalid"), None, "probe payload must be an object"
     if set(payload) - _ALLOWED_TOP_LEVEL:
         extra = ", ".join(sorted(set(payload) - _ALLOWED_TOP_LEVEL))
         return _unknown_probes("probe payload contained unexpected fields"), None, f"unexpected probe payload fields: {extra}"
@@ -79,6 +101,8 @@ def _validate_payload(
         signature = payload.get("attestation")
         if not isinstance(signature, str):
             return _unknown_probes("probe attestation was missing"), None, "probe attestation was missing"
+        if re.fullmatch(r"[0-9a-f]{64}", signature) is None:
+            return _unknown_probes("probe attestation did not validate"), None, "probe attestation did not validate"
         expected = hmac.new(
             attestation_key.encode("utf-8"),
             _canonical_for_attestation(payload),
@@ -124,10 +148,15 @@ def risk_summary(probes: list[ProbeResult]) -> tuple[str, list[str]]:
         return "HIGH", exposures
 
     by_name = {p.capability: p for p in probes}
-    risky_states = [by_name[name].status for name in RISKY_CAPABILITIES if name in by_name]
-    if any(state in {ProbeStatus.UNKNOWN, ProbeStatus.ERROR} for state in risky_states):
+    if set(by_name) != set(CAPABILITIES) or len(by_name) != len(probes):
         return "UNKNOWN", exposures
-    if any(state == ProbeStatus.SKIPPED for state in risky_states):
+    if any(
+        p.status in {ProbeStatus.UNKNOWN, ProbeStatus.ERROR}
+        or (p.status == ProbeStatus.ABSENT and p.capability not in OPTIONAL_RESOURCE_CAPABILITIES)
+        for p in probes
+    ):
+        return "UNKNOWN", exposures
+    if any(p.status == ProbeStatus.SKIPPED for p in probes):
         return "PARTIAL", exposures
     return "LOW", exposures
 
@@ -155,6 +184,14 @@ def make_report(
         errors.append("agent runner timed out")
     elif exit_code not in (None, 0):
         errors.append(f"agent runner exited with status {exit_code}")
+    if not payload_error:
+        unusable = [
+            f"{probe.capability} ({probe.status.value})"
+            for probe in probes
+            if probe.status in {ProbeStatus.UNKNOWN, ProbeStatus.ERROR}
+        ]
+        if unusable:
+            errors.append(f"unusable probe evidence: {', '.join(unusable)}")
     evidence_error = "; ".join(errors) if errors else None
 
     level, exposures = risk_summary(probes)

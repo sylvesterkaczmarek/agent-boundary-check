@@ -27,14 +27,22 @@ FRIENDLY = {
 }
 
 
+def safe_text(value: object) -> str:
+    """Keep metadata and probe details from changing terminal layout or state."""
+    return "".join(
+        character if character.isprintable() else ascii(character)[1:-1]
+        for character in str(value)
+    )
+
+
 def render_report(report: RunReport) -> None:
     print()
-    print(f"Agent Boundary Check  {report.risk_level}")
-    version = f" · {report.agent_version}" if report.agent_version else ""
-    print(f"{report.agent}{version}")
-    print(f"Host: {report.platform}")
+    print(f"Agent Boundary Check  {safe_text(report.risk_level)}")
+    version = f" · {safe_text(report.agent_version)}" if report.agent_version else ""
+    print(f"{safe_text(report.agent)}{version}")
+    print(f"Host: {safe_text(report.platform)}")
     if report.probe_platform:
-        print(f"Probe: {report.probe_platform}")
+        print(f"Probe: {safe_text(report.probe_platform)}")
     print()
 
     rows = [(FRIENDLY.get(p.capability, p.capability), SYMBOL[p.status], p.detail) for p in report.probes]
@@ -42,13 +50,13 @@ def render_report(report: RunReport) -> None:
     state_width = max([len("Effective"), *(len(r[1]) for r in rows)]) if rows else len("Effective")
     print(f"{'Capability':<{cap_width}}  {'Effective':<{state_width}}  Evidence")
     for capability, status, detail in rows:
-        print(f"{capability:<{cap_width}}  {status:<{state_width}}  {detail}")
+        print(f"{safe_text(capability):<{cap_width}}  {status:<{state_width}}  {safe_text(detail)}")
 
     hints = {k: v for k, v in report.declared_hints.items() if v not in (None, [], {}, "")}
     if hints:
         print("\nDeclared configuration hints")
         for key in sorted(hints):
-            print(f"• {key}: {hints[key]}")
+            print(f"• {safe_text(key)}: {safe_text(hints[key])}")
 
     if report.exposures:
         print("\nBlast-radius exposures")
@@ -57,8 +65,8 @@ def render_report(report: RunReport) -> None:
     if report.policy_violations:
         print("\nPolicy violations")
         for violation in report.policy_violations:
-            print(f"• {violation}")
+            print(f"• {safe_text(violation)}")
     if report.runner_timed_out:
         print("\nAgent runner timed out before the probe completed.")
     if report.evidence_error:
-        print(f"\nEvidence incomplete: {report.evidence_error}")
+        print(f"\nEvidence incomplete: {safe_text(report.evidence_error)}")

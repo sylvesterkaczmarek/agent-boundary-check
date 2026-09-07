@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from . import __version__
@@ -13,19 +15,54 @@ from .diffing import diff_reports, load_report
 from .lab import RUN_ID_RE, cleanup_home_canary_for_run, create_lab
 from .models import ProbeStatus
 from .policy import load_policy
-from .render import render_report
+from .render import render_report, safe_text
 from .report import make_report, parse_probe_payload
 from .runner import verify
 
 
 def _error(message: str) -> None:
-    print(f"error: {message}", file=sys.stderr)
+    print(f"error: {safe_text(message)}", file=sys.stderr)
 
 
-def _write_json(report, path: Path | None) -> None:
+def _resolve_path(path: Path, *, strict: bool = False) -> Path:
+    try:
+        return path.expanduser().resolve(strict=strict)
+    except RuntimeError as exc:  # Symlink loops on Python 3.11 and 3.12.
+        raise ValueError(f"could not resolve path: {path}") from exc
+
+
+def _validate_output(path: Path | None, protected: tuple[Path, ...] = ()) -> None:
+    if path is None:
+        return
+    path = path.expanduser()
+    try:
+        resolved = _resolve_path(path, strict=True)
+    except FileNotFoundError:
+        resolved = _resolve_path(path)
+    for source in protected:
+        source = source.expanduser()
+        if resolved == _resolve_path(source) or (path.exists() and source.exists() and path.samefile(source)):
+            raise ValueError(f"report output would overwrite an input file: {source}")
+
+
+def _write_json(report, path: Path | None, protected: tuple[Path, ...] = ()) -> None:
     if path:
+        path = path.expanduser()
+        _validate_output(path, protected)
+        content = json.dumps(report.to_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
 
 def _positive_int(value: str) -> int:
@@ -40,7 +77,7 @@ def _positive_int(value: str) -> int:
 
 def _has_unusable_evidence(report) -> bool:
     runner_failed = report.runner_timed_out or report.runner_exit_code not in (None, 0)
-    return runner_failed or bool(report.evidence_error) or any(
+    return runner_failed or not report.evidence_complete or bool(report.evidence_error) or any(
         probe.status in {ProbeStatus.UNKNOWN, ProbeStatus.ERROR} for probe in report.probes
     )
 
@@ -59,7 +96,7 @@ def cmd_agents(args) -> int:
 
 
 def _policy(args):
-    return load_policy(Path(args.policy)) if getattr(args, "policy", None) else None
+    return load_policy(Path(args.policy).expanduser()) if getattr(args, "policy", None) else None
 
 
 def _require_installed_builtin(agent_name: str) -> None:
@@ -75,6 +112,10 @@ def _require_installed_builtin(agent_name: str) -> None:
 
 def cmd_verify(args) -> int:
     try:
+        protected = (Path(args.policy),) if args.policy else ()
+        output = Path(args.json) if args.json else None
+        _validate_output(output, protected)
+        policy = _policy(args)
         agent_name = args.agent
         if agent_name == "auto":
             detected = detect_agents()
@@ -89,7 +130,7 @@ def cmd_verify(args) -> int:
             adapter,
             timeout=args.timeout,
             network_probe=not args.no_network,
-            policy=_policy(args),
+            policy=policy,
             keep_lab=args.keep_lab,
         )
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -97,8 +138,8 @@ def cmd_verify(args) -> int:
         return 2
     render_report(report)
     try:
-        _write_json(report, Path(args.json) if args.json else None)
-    except OSError as exc:
+        _write_json(report, output, protected)
+    except (ValueError, OSError) as exc:
         _error(str(exc))
         return 2
     if lab:
@@ -139,10 +180,15 @@ def cmd_prepare(args) -> int:
 
 
 def cmd_collect(args) -> int:
-    root = Path(args.lab).expanduser().resolve()
+    root = _resolve_path(Path(args.lab))
     manifest_path = root / "workspace" / ".agent-boundary" / "manifest.json"
     results_path = root / "workspace" / ".agent-boundary" / "results.json"
     try:
+        protected = tuple(manifest_path.parent / name for name in (
+            "manifest.json", "results.json", "probe_driver.py", "PROMPT.txt",
+        )) + ((Path(args.policy),) if args.policy else ())
+        output = Path(args.json) if args.json else None
+        _validate_output(output, protected)
         if not manifest_path.exists():
             raise ValueError("lab manifest not found")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -156,6 +202,17 @@ def cmd_collect(args) -> int:
         attestation_key = manifest.get("attestation_key")
         if not isinstance(attestation_key, str) or not attestation_key:
             raise ValueError("lab manifest has no valid attestation key")
+        protected += tuple(
+            Path(manifest[key]) for key in (
+                "workspace_read_path", "workspace_write_path", "outside_read_path",
+                "outside_write_path", "home_read_path", "home_write_path",
+            ) if isinstance(manifest.get(key), str)
+        )
+        _validate_output(output, protected)
+        if output is not None:
+            canary_directory = _resolve_path(Path.home() / ".agent-boundary-check" / "canaries" / run_id)
+            if _resolve_path(output).is_relative_to(canary_directory):
+                raise ValueError("report output cannot be inside the home canary directory scheduled for cleanup")
         payload = parse_probe_payload(results_path, "")
         report = make_report(
             run_id=run_id,
@@ -175,14 +232,15 @@ def cmd_collect(args) -> int:
 
     render_report(report)
     try:
-        _write_json(report, Path(args.json) if args.json else None)
-    except OSError as exc:
+        _write_json(report, output, protected)
+    except (ValueError, OSError) as exc:
         _error(str(exc))
-        cleanup_home_canary_for_run(run_id)
+        if not _has_unusable_evidence(report):
+            cleanup_home_canary_for_run(run_id, lab_root=root, attestation_key=attestation_key)
         return 2
-    cleanup_home_canary_for_run(run_id)
     if _has_unusable_evidence(report):
         return 2
+    cleanup_home_canary_for_run(run_id, lab_root=root, attestation_key=attestation_key)
     if report.policy_violations:
         return 1
     return 0
@@ -197,17 +255,27 @@ def cmd_diff(args) -> int:
         _error(str(exc))
         return 2
     print("Agent Boundary Diff")
-    print(f"Agent: {result.before_agent} -> {result.after_agent}")
-    print(f"Version: {result.before_version or '-'} -> {result.after_version or '-'}")
+    print(f"Agent: {safe_text(result.before_agent)} -> {safe_text(result.after_agent)}")
+    print(f"Version: {safe_text(result.before_version or '-')} -> {safe_text(result.after_version or '-')}")
     print(f"Risk: {result.before_risk} -> {result.after_risk}")
+    for label in ("before", "after"):
+        for issue in getattr(result, f"{label}_evidence_issues"):
+            print(f"{label} evidence incomplete: {safe_text(issue)}")
+        skipped = getattr(result, f"{label}_skipped")
+        if skipped:
+            print(f"{label} skipped checks: {', '.join(skipped)}")
+        for violation in getattr(result, f"{label}_policy_violations"):
+            print(f"{label} policy violation: {safe_text(violation)}")
     if not result.changes:
         print("\nNo capability changes.")
-        return 0
-    print("\nCapability changes")
-    for change in result.changes:
-        suffix = "  NEW EXPOSURE" if change.new_exposure else ""
-        print(f"• {change.capability}: {change.before} -> {change.after}{suffix}")
-    return 1 if result.has_new_exposure else 0
+    else:
+        print("\nCapability changes")
+        for change in result.changes:
+            suffix = "  NEW EXPOSURE" if change.new_exposure else ""
+            print(f"• {change.capability}: {change.before} -> {change.after}{suffix}")
+    if result.has_unusable_evidence:
+        return 2
+    return 1 if result.has_new_exposure or result.after_policy_violations else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -256,7 +324,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except (ValueError, OSError, UnicodeError) as exc:
+        _error(str(exc))
+        return 2
+    except KeyboardInterrupt:
+        _error("interrupted")
+        return 130
 
 
 if __name__ == "__main__":

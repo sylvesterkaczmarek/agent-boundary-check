@@ -35,6 +35,7 @@ def verify(
         raise ValueError("timeout must be greater than zero")
 
     lab = create_lab(network_probe=network_probe, environment_probe=True)
+    completed = False
     try:
         _init_git(lab.workspace)
         env = {
@@ -43,8 +44,7 @@ def verify(
         version = adapter.get_version()
         hints = adapter.declared_hints(lab.workspace)
         run = adapter.run(lab.prompt, lab.prompt_path, lab.workspace, env, timeout)
-        combined_output = (run.stdout or "") + ("\n" + run.stderr if run.stderr else "")
-        payload = parse_probe_payload(lab.results_path, combined_output)
+        payload = parse_probe_payload(lab.results_path, run.stdout or "", stderr=run.stderr or "")
         report = make_report(
             run_id=lab.run_id,
             agent=adapter.name,
@@ -57,10 +57,12 @@ def verify(
             runner_output="",
             attestation_key=lab.attestation_key,
         )
-        lab.cleanup_home_canary()
-        if not keep_lab:
-            lab.cleanup()
+        completed = True
         return report, lab if keep_lab else None
-    except Exception:
-        lab.cleanup()
-        raise
+    finally:
+        # Interruption must also remove synthetic canaries. Keep a lab only
+        # after a report was produced and the caller explicitly requested it.
+        if completed and keep_lab:
+            lab.cleanup_home_canary()
+        else:
+            lab.cleanup()

@@ -199,3 +199,147 @@ def test_codex_invalid_utf8_config_is_reported_not_raised(tmp_path, monkeypatch)
     monkeypatch.setenv("CODEX_HOME", str(home))
     hints = CodexAdapter().declared_hints(tmp_path)
     assert hints["config_parse"] == "failed"
+
+
+def test_custom_command_preserves_placeholder_text_inside_values():
+    adapter = CommandAdapter('runner --prompt={prompt} --file={prompt_file}')
+    prompt = 'Keep {prompt_file}, {prompt}, spaces and "quotes" literal'
+    path = Path('folder-{prompt}/prompt file.txt')
+    assert adapter.build_command(prompt, path) == [
+        'runner', '--prompt=' + prompt, '--file=' + str(path),
+    ]
+
+
+@pytest.mark.parametrize('template', ['""', 'runner "unterminated', 'runner\0x'])
+def test_custom_command_rejects_invalid_template_before_running(template):
+    with pytest.raises(ValueError):
+        CommandAdapter(template)
+
+
+def test_custom_command_windows_preserves_embedded_quotes_and_backslashes(monkeypatch):
+    import agent_boundary_check.adapters.command as command_module
+
+    monkeypatch.setattr(command_module, 'os', SimpleNamespace(name='nt'))
+    adapter = CommandAdapter(r'runner --path="C:\My Files\\" --label="a \"quote\"" {prompt}')
+    assert adapter.build_command('hello', Path('p')) == [
+        'runner', '--path=C:\\My Files\\', '--label=a "quote"', 'hello',
+    ]
+
+
+@pytest.mark.parametrize('arguments', [
+    ['runner', '', 'hello world', 'tab\tvalue'],
+    ['C:\\Program Files\\runner.exe', 'C:\\My Files\\', '\\', '\\\\'],
+    ['runner', 'a"b', 'a\\"b', 'a\\\\"b', 'quoted "value" end\\'],
+    ['runner', "it's literal", 'x=y z', '{prompt}'],
+])
+def test_windows_parser_round_trips_python_argument_quoting(arguments):
+    from agent_boundary_check.adapters.command import _split_windows_command
+
+    assert _split_windows_command(subprocess.list2cmdline(arguments)) == arguments
+
+
+def test_agent_output_with_invalid_utf8_is_retained_without_crashing(tmp_path):
+    script = tmp_path / 'binary.py'
+    script.write_text("import os\nos.write(1, b'out\\xff')\nos.write(2, b'err\\xfe')\n")
+    result = CommandAdapter(f'"{sys.executable}" "{script}"').run('unused', tmp_path/'p', tmp_path, {}, 5)
+    assert result.exit_code == 0
+    assert result.stdout == 'out\ufffd'
+    assert result.stderr == 'err\ufffd'
+
+
+def test_agent_timeout_retains_invalid_utf8_output(tmp_path):
+    script = tmp_path / 'binary_timeout.py'
+    script.write_text("import os, time\nos.write(1, b'partial\\xff')\ntime.sleep(5)\n")
+    result = CommandAdapter(f'"{sys.executable}" "{script}"').run('unused', tmp_path/'p', tmp_path, {}, 1)
+    assert result.timed_out
+    assert result.exit_code is None
+    assert result.stdout == 'partial\ufffd'
+
+
+@pytest.mark.parametrize('returncode,expected', [(0, 'version\ufffd'), (2, None)])
+def test_version_requires_success_and_tolerates_invalid_utf8(tmp_path, returncode, expected):
+    script = tmp_path / 'version.py'
+    script.write_text(f"import os, sys\nos.write(1, b'version\\xff')\nsys.exit({returncode})\n")
+
+    class StubAdapter(AgentAdapter):
+        def version_command(self):
+            return [sys.executable, str(script)]
+
+    assert StubAdapter().get_version() == expected
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX process-group cleanup')
+@pytest.mark.parametrize('timeout_parent', [True, False])
+def test_agent_run_stops_its_background_tools(tmp_path, timeout_parent):
+    import time
+
+    ready = tmp_path / 'ready'
+    marker = tmp_path / 'late-write'
+    child = tmp_path / 'child.py'
+    child.write_text(
+        'import time\nfrom pathlib import Path\n'
+        f'Path({str(ready)!r}).touch()\n'
+        'time.sleep(2)\n'
+        f'Path({str(marker)!r}).touch()\n'
+    )
+    parent = tmp_path / 'parent.py'
+    parent.write_text(
+        'import subprocess, sys, time\nfrom pathlib import Path\n'
+        f'subprocess.Popen([sys.executable, {str(child)!r}])\n'
+        f'while not Path({str(ready)!r}).exists(): time.sleep(0.01)\n'
+        + ('time.sleep(5)\n' if timeout_parent else '')
+    )
+    result = CommandAdapter(f'"{sys.executable}" "{parent}"').run(
+        'unused', tmp_path/'p', tmp_path, {}, 1,
+    )
+    assert ready.exists(), 'The child must start before cleanup is tested'
+    assert result.timed_out is timeout_parent
+    time.sleep(2.1)
+    assert not marker.exists(), 'A background tool wrote after the invocation ended'
+
+
+def test_claude_honours_user_config_directory_override(tmp_path, monkeypatch):
+    home = tmp_path / 'home'
+    default = home / '.claude' / 'settings.json'
+    default.parent.mkdir(parents=True)
+    default.write_text('{"permissions":{"additionalDirectories":["old","unused"]}}')
+    custom = tmp_path / 'custom'
+    custom.mkdir()
+    settings = custom / 'settings.json'
+    settings.write_text('{"permissions":{"additionalDirectories":["active"]}}')
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: home))
+    monkeypatch.setenv('CLAUDE_CONFIG_DIR', str(custom))
+    hints = ClaudeAdapter().declared_hints(tmp_path)
+    assert display_path(settings) in hints['config_files']
+    assert display_path(default) not in hints['config_files']
+    assert hints['additional_directory_count'] == 1
+
+
+def test_windows_timeout_cleanup_targets_only_owned_child(monkeypatch):
+    import agent_boundary_check.adapters.base as base_module
+
+    calls = []
+
+    class Process:
+        pid = 73129
+        alive = True
+
+        def poll(self):
+            return None if self.alive else 1
+
+        def kill(self):
+            calls.append('direct-kill')
+            self.alive = False
+
+        def wait(self):
+            calls.append('wait')
+            return 1
+
+    def taskkill(command, **kwargs):
+        calls.append(command)
+        raise OSError('taskkill unavailable')
+
+    monkeypatch.setattr(base_module, 'os', SimpleNamespace(name='nt'))
+    monkeypatch.setattr(base_module.subprocess, 'run', taskkill)
+    base_module._stop_processes(Process())
+    assert calls == [['taskkill', '/PID', '73129', '/T', '/F'], 'direct-kill', 'wait']
