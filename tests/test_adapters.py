@@ -273,6 +273,8 @@ def test_version_requires_success_and_tolerates_invalid_utf8(tmp_path, returncod
 def test_agent_run_stops_its_background_tools(tmp_path, timeout_parent):
     import time
 
+    # These helpers use only the standard library. Exclude host startup
+    # hooks from both interpreters within the one-second cleanup deadline.
     ready = tmp_path / 'ready'
     marker = tmp_path / 'late-write'
     child = tmp_path / 'child.py'
@@ -285,11 +287,11 @@ def test_agent_run_stops_its_background_tools(tmp_path, timeout_parent):
     parent = tmp_path / 'parent.py'
     parent.write_text(
         'import subprocess, sys, time\nfrom pathlib import Path\n'
-        f'subprocess.Popen([sys.executable, {str(child)!r}])\n'
+        f'subprocess.Popen([sys.executable, "-I", "-S", {str(child)!r}])\n'
         f'while not Path({str(ready)!r}).exists(): time.sleep(0.01)\n'
         + ('time.sleep(5)\n' if timeout_parent else '')
     )
-    result = CommandAdapter(f'"{sys.executable}" "{parent}"').run(
+    result = CommandAdapter(f'"{sys.executable}" -I -S "{parent}"').run(
         'unused', tmp_path/'p', tmp_path, {}, 1,
     )
     assert ready.exists(), 'The child must start before cleanup is tested'
