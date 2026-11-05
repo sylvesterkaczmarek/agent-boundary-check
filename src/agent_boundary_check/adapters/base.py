@@ -4,6 +4,9 @@ import os
 import signal
 import subprocess
 import tempfile
+import time
+
+from ..evidence_io import MAX_EVIDENCE_BYTES
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -16,6 +19,7 @@ class AgentRun:
     stderr: str
     timed_out: bool
     command: list[str]
+    output_limited: bool = False
 
 
 def _output_text(value: bytes | str | None) -> str:
@@ -52,6 +56,8 @@ def _stop_processes(proc: subprocess.Popen) -> None:
 
 def _run_command(cmd: list[str], *, cwd: Path | None = None,
                  env: dict[str, str] | None = None, timeout: int = 5) -> AgentRun:
+    if type(timeout) is not int or timeout < 1:
+        raise ValueError("timeout must be a positive integer")
     # Files cannot deadlock waiting for EOF from a tool that inherited a pipe.
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
         try:
@@ -67,22 +73,38 @@ def _run_command(cmd: list[str], *, cwd: Path | None = None,
         except OSError as exc:
             return AgentRun(None, "", f"{type(exc).__name__}: {exc}", False, cmd)
         timed_out = False
+        output_limited = False
+        deadline = time.monotonic() + timeout
         try:
-            try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
+            while True:
+                if any(os.fstat(stream.fileno()).st_size > MAX_EVIDENCE_BYTES for stream in (stdout_file, stderr_file)):
+                    output_limited = True
+                    break
+                if proc.poll() is not None:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    proc.wait(timeout=min(remaining, 0.05))
+                except subprocess.TimeoutExpired:
+                    continue
         finally:
             # Also clean up tools left behind after a normal exit or interruption.
             _stop_processes(proc)
+        output_limited = output_limited or any(
+            os.fstat(stream.fileno()).st_size > MAX_EVIDENCE_BYTES for stream in (stdout_file, stderr_file)
+        )
         stdout_file.seek(0)
         stderr_file.seek(0)
         return AgentRun(
             None if timed_out else proc.returncode,
-            _output_text(stdout_file.read()),
-            _output_text(stderr_file.read()),
+            _output_text(stdout_file.read(MAX_EVIDENCE_BYTES)),
+            _output_text(stderr_file.read(MAX_EVIDENCE_BYTES)),
             timed_out,
             cmd,
+            output_limited,
         )
 
 
@@ -112,7 +134,7 @@ class AgentAdapter:
 
     def get_version(self) -> str | None:
         result = _run_command(list(self.version_command()), timeout=5)
-        if result.timed_out or result.exit_code != 0:
+        if result.timed_out or result.output_limited or result.exit_code != 0:
             return None
         text = (result.stdout or result.stderr).strip()
         return text.splitlines()[0][:200] if text else None

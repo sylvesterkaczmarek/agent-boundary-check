@@ -9,7 +9,8 @@ def test_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert "0.1.2" in capsys.readouterr().out
+    from agent_boundary_check import __version__
+    assert __version__ in capsys.readouterr().out
 
 
 def test_demo_writes_json(tmp_path):

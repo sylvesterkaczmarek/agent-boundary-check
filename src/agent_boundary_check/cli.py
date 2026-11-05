@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from . import __version__
+from .evidence_io import read_json
 from .adapters import BUILTIN_ADAPTERS, detect_agents, get_adapter
 from .adapters.command import CommandAdapter
 from .diffing import diff_reports, load_report
@@ -130,6 +131,7 @@ def cmd_verify(args) -> int:
             adapter,
             timeout=args.timeout,
             network_probe=not args.no_network,
+            socket_probe=not args.no_sockets,
             policy=policy,
             keep_lab=args.keep_lab,
         )
@@ -154,7 +156,7 @@ def cmd_verify(args) -> int:
 def cmd_demo(args) -> int:
     command = f'"{sys.executable}" .agent-boundary/probe_driver.py'
     adapter = CommandAdapter(command)
-    report, _ = verify(adapter, timeout=30, network_probe=False, policy=None, keep_lab=False)
+    report, _ = verify(adapter, timeout=30, network_probe=False, socket_probe=False, policy=None, keep_lab=False)
     report.agent = "demo-runner"
     render_report(report)
     try:
@@ -167,7 +169,7 @@ def cmd_demo(args) -> int:
 
 def cmd_prepare(args) -> int:
     try:
-        lab = create_lab(Path(args.output), network_probe=not args.no_network, environment_probe=False)
+        lab = create_lab(Path(args.output), network_probe=not args.no_network, environment_probe=False, socket_probe=not args.no_sockets)
     except (ValueError, OSError) as exc:
         _error(str(exc))
         return 2
@@ -191,7 +193,7 @@ def cmd_collect(args) -> int:
         _validate_output(output, protected)
         if not manifest_path.exists():
             raise ValueError("lab manifest not found")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = read_json(manifest_path, strict_parents=True)
         if not isinstance(manifest, dict):
             raise ValueError("lab manifest must be a mapping")
         if type(manifest.get("schema_version")) is not int or manifest.get("schema_version") != 1:
@@ -294,6 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument("--command", help="custom command template; supports {prompt} and {prompt_file}")
     verify_p.add_argument("--timeout", type=_positive_int, default=180)
     verify_p.add_argument("--no-network", action="store_true", help="skip the TCP egress probe")
+    verify_p.add_argument("--no-sockets", action="store_true", help="skip host socket discovery and connection probes")
     verify_p.add_argument("--policy", help="optional TOML boundary policy")
     verify_p.add_argument("--json", help="write machine-readable report")
     verify_p.add_argument("--keep-lab", action="store_true", help="retain the synthetic workspace after the run")
@@ -306,6 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = sub.add_parser("prepare", help="prepare a manual lab for unsupported or GUI coding agents")
     prepare.add_argument("--output", required=True, help="empty directory to create")
     prepare.add_argument("--no-network", action="store_true")
+    prepare.add_argument("--no-sockets", action="store_true")
     prepare.set_defaults(func=cmd_prepare)
 
     collect = sub.add_parser("collect", help="collect results from a manually-run boundary lab")
