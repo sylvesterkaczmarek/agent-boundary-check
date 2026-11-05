@@ -6,3 +6,6 @@ recursive-include assets *.png
 recursive-include .github/workflows *.yml
 
 recursive-include scripts *.py
+
+recursive-include verification *.json
+include .release-version

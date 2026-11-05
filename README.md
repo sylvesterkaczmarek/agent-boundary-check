@@ -11,9 +11,9 @@
 
 Agent Boundary Check is a focused command-line security tool (CLI) for measuring the effective execution boundary of AI coding agents with synthetic canaries. It asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The `agent-boundary` command is the supported public interface; the Python package currently contains implementation internals rather than a separately supported library API. The CLI has zero runtime dependencies beyond Python 3.11+.
 
-## November reliability candidate
+## Version 0.2.0
 
-Version **0.2.0rc1** is an unpublished candidate for separate review. It adds
+Version **0.2.0** includes separately tested reliability corrections. It adds
 bounded, duplicate-free JSON evidence parsing, stricter measurement completeness,
 non-redirecting synthetic file access and explicit subprocess-output limits.
 `--no-sockets` disables both host socket discovery and connection checks. The
@@ -22,7 +22,14 @@ account-free `demo` now disables external TCP and host sockets unconditionally.
 The new [offline demonstration](docs/verification.md) exercises observed local
 exposure, policy rejection and evidence failures. It uses synthetic resources and
 does not characterize Codex, Claude Code or Gemini without a live agent run.
-See the [audit and migration notes](docs/audit-2026-11-05.md).
+The [independent review](docs/independent-review-2026-11-05.md) records three
+additional issue groups and their regression tests. The standalone driver now
+validates the complete synthetic manifest before any probe, conflicting stream
+evidence is compared without numeric-type coercion, and failures after file
+creation cannot be misreported as denied write access.
+
+See the [release notes](docs/release-0.2.0.md), [migration guide](docs/migration-0.2.md)
+and [original implementation audit](docs/audit-2026-11-05.md).
 
 ## At a glance
 

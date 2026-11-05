@@ -89,3 +89,16 @@ The account-free demo disables both network and Unix socket probing. The new
 no-sockets option prevents host socket discovery and baselines as well as the
 agent-side check. Unsupported remote Docker transports are skipped, not absent.
 See audit-2026-11-05.md for interpretation and compatibility details.
+
+## Version 0.2.0 preflight
+
+Before running any probe, the copied driver validates its complete manifest:
+strict bounded JSON, typed controls, synthetic tokens, workspace/outside layout
+and home-canary run binding. Malformed instructions stop with a concise error.
+Collection applies the same structural checks. Stream comparison preserves
+JSON scalar types, so integer/boolean aliases cannot hide a conflict.
+
+A failure after exclusive marker creation is inconclusive and is never labelled
+as denied write access. This includes a later write, flush or close failure.
+These checks protect measurement integrity but do not authenticate a malicious
+agent that can modify the driver, manifest and run-local key together.

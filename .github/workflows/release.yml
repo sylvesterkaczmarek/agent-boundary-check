@@ -1,170 +1,170 @@
 name: Publish to PyPI
-
 on:
   push:
-    branches:
-      - main
-    paths:
-      - ".release-version"
-
+    branches: [main]
+    paths: [".release-version"]
 permissions:
   contents: read
-
 concurrency:
   group: pypi-publish
   cancel-in-progress: false
-
 jobs:
   verify:
     name: Verify exact release commit
     uses: ./.github/workflows/ci.yml
-
   build:
+    name: Build verified distributions
     needs: verify
-    name: Build distributions
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          fetch-depth: 0
           persist-credentials: false
-
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install build tooling
-        run: python -m pip install --upgrade build twine
-
-      - name: Verify release version
+          python-version: "3.14"
+      - name: Validate reviewed version
         id: version
-        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          PACKAGE_VERSION="$(python - <<'PY'
-          import tomllib
-          from pathlib import Path
-
-          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-          print(data["project"]["version"])
-          PY
-          )"
-          RELEASE_VERSION="$(tr -d '[:space:]' < .release-version)"
-          test "${RELEASE_VERSION}" = "${PACKAGE_VERSION}" || {
-            echo ".release-version (${RELEASE_VERSION}) does not match package version (${PACKAGE_VERSION})"
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          test "$(tr -d '[:space:]' < .release-version)" = "$VERSION"
+          python -c 'import re,sys; assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",sys.argv[1])' "$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo 'Version tag already exists; refusing to replace it.' >&2
             exit 1
-          }
-          python -c 'import re,sys; assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",sys.argv[1]), "Only final reviewed versions may publish"' "${PACKAGE_VERSION}"
-          echo "version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Build wheel and source distribution
-        run: python -m build
-
-      - name: Validate distributions
-        run: python -m twine check dist/*
-
-      - name: Verify the exact built distributions
-        run: python scripts/verify_distribution.py dist/*.whl dist/*.tar.gz --report proof/distribution.json
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - run: python scripts/verify_distribution.py dist/*.whl dist/*.tar.gz --report proof/distribution.json
+      - name: Record release evidence
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git archive --format=zip --output=proof/source.zip HEAD
+          cp "docs/release-${VERSION}.md" proof/RELEASE_NOTES.md
+          cp docs/independent-review-2026-11-05.md proof/INDEPENDENT_REVIEW.md
+          printf '%s\n' "$GITHUB_SHA" > proof/COMMIT.txt
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          paths = sorted([*Path('dist').iterdir(), *Path('proof').iterdir()])
+          Path('proof/SHA256SUMS.txt').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in paths), encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: python-package-distributions
-          path: dist/
+          path: dist/*
           if-no-files-found: error
-
+          retention-days: 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-proof
+          path: proof/*
+          if-no-files-found: error
+          retention-days: 90
   publish:
     name: Publish distributions
     needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/agent-boundary-check
+      url: https://pypi.org/project/agent-boundary-check/
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Download distributions
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: python-package-distributions
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
-
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
   verify-pypi:
-    name: Verify public PyPI install (Python ${{ matrix.python-version }})
+    name: Verify public PyPI package (${{ matrix.python }})
     needs: [build, publish]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.14"]
+        python: ["3.11", "3.14"]
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install released package from public PyPI
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: python-package-distributions
+          path: expected-dist
+      - name: Compare public files with reviewed build
         env:
           VERSION: ${{ needs.build.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in {1..12}; do
-            if python -m pip install --no-cache-dir --index-url https://pypi.org/simple "agent-boundary-check==${VERSION}"; then
-              break
-            fi
-            if [[ "$attempt" -eq 12 ]]; then
-              echo "agent-boundary-check ${VERSION} was not installable from public PyPI." >&2
-              exit 1
-            fi
-            sleep 10
-          done
-          python -m pip check
-
-      - name: Smoke test released package
-        env:
-          VERSION: ${{ needs.build.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmpdir="$(mktemp -d)"
-          cd "$tmpdir"
-          agent-boundary --version
-          agent-boundary demo --json agent-boundary-pypi-smoke.json
-          test -s agent-boundary-pypi-smoke.json
-          python - <<'PY'
-          import os
-          from importlib.metadata import version
-
-          assert version("agent-boundary-check") == os.environ["VERSION"]
-          PY
-
-  tag:
-    name: Tag published version
-    needs: [build, publish, verify-pypi]
+        run: python scripts/verify_pypi_files.py --expected expected-dist --out public-dist --version "$VERSION"
+      - name: Test public distributions in isolation
+        run: python scripts/verify_distribution.py public-dist/*.whl public-dist/*.tar.gz --report proof/public-pypi.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-pypi-${{ matrix.python }}
+          path: proof/public-pypi.json
+          if-no-files-found: error
+          retention-days: 90
+  github-release:
+    name: Publish verified GitHub release
+    needs: [build, verify-pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: python-package-distributions
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-proof
+          path: proof
+      - name: Publish checked artifacts without replacing a version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/* proof/* --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "Agent Boundary Check v$VERSION" \
+            --notes-file proof/RELEASE_NOTES.md --latest
+  verify-github:
+    name: Verify public GitHub assets
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 0
-
-      - name: Create release tag
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+      - name: Download and verify public release
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
-        shell: bash
         run: |
-          TAG="v${VERSION}"
-          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "${TAG} already exists"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "${TAG}"
-          git push origin "${TAG}"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --dir public-assets
+          cd public-assets
+          sha256sum --check SHA256SUMS.txt
+          test "$(cat COMMIT.txt)" = "$GITHUB_SHA"
+      - run: python scripts/verify_distribution.py public-assets/*.whl public-assets/*.tar.gz --report proof/public-github.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-github-verification
+          path: proof/public-github.json
+          if-no-files-found: error
+          retention-days: 90

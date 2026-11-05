@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-boundary-check"
-version = "0.2.0rc1"
+version = "0.2.0"
 description = "Command-line security tool that verifies what AI coding agents can actually read, write, execute and reach using synthetic canaries."
 readme = "README.md"
 requires-python = ">=3.11"
