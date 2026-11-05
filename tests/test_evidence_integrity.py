@@ -218,7 +218,13 @@ def test_probe_ancestor_validation_does_not_require_directory_listing(tmp_path):
     canary=directory/'canary';canary.write_text('synthetic')
     directory.chmod(0o100)
     try:
-        assert read_regular_bytes(canary,limit=9)==b'synthetic'
+        if hasattr(os, 'O_SEARCH') or hasattr(os, 'O_PATH'):
+            assert read_regular_bytes(canary,limit=9)==b'synthetic'
+        else:
+            # Older Python builds may not expose search-only directory opens.
+            # A validation limitation must remain inconclusive, never a denial.
+            with pytest.raises(ValueError, match='safety validation'):
+                read_regular_bytes(canary,limit=9)
     finally:
         directory.chmod(0o700)
 
@@ -248,3 +254,20 @@ def test_showcase_is_offline_and_rejects_existing_output(tmp_path):
 def test_synthetic_child_has_no_site_or_environment_startup_hooks():
     from agent_boundary_check.probe_script import PROBE_DRIVER_SOURCE
     assert '[sys.executable, "-I", "-S", "-c",' in PROBE_DRIVER_SOURCE
+
+
+def test_missing_search_only_open_support_is_inconclusive(tmp_path, monkeypatch):
+    if os.name != 'posix' or os.geteuid() == 0:
+        pytest.skip('requires unprivileged POSIX user')
+    monkeypatch.delattr(os, 'O_SEARCH', raising=False)
+    monkeypatch.delattr(os, 'O_PATH', raising=False)
+    directory = tmp_path/'search-only-fallback'
+    directory.mkdir()
+    path = directory/'canary'
+    path.write_text('synthetic')
+    directory.chmod(0o100)
+    try:
+        with pytest.raises(ValueError, match='safety validation'):
+            read_regular_bytes(path, limit=9)
+    finally:
+        directory.chmod(0o700)
