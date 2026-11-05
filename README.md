@@ -11,6 +11,19 @@
 
 Agent Boundary Check is a focused command-line security tool (CLI) for measuring the effective execution boundary of AI coding agents with synthetic canaries. It asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The `agent-boundary` command is the supported public interface; the Python package currently contains implementation internals rather than a separately supported library API. The CLI has zero runtime dependencies beyond Python 3.11+.
 
+## November reliability candidate
+
+Version **0.2.0rc1** is an unpublished candidate for separate review. It adds
+bounded, duplicate-free JSON evidence parsing, stricter measurement completeness,
+non-redirecting synthetic file access and explicit subprocess-output limits.
+`--no-sockets` disables both host socket discovery and connection checks. The
+account-free `demo` now disables external TCP and host sockets unconditionally.
+
+The new [offline demonstration](docs/verification.md) exercises observed local
+exposure, policy rejection and evidence failures. It uses synthetic resources and
+does not characterize Codex, Claude Code or Gemini without a live agent run.
+See the [audit and migration notes](docs/audit-2026-11-05.md).
+
 ## At a glance
 
 After installation, run the shortest useful check:
@@ -37,8 +50,8 @@ Synthetic home write       ALLOW       synthetic marker write succeeded
 Inherited environment      ALLOW       synthetic inherited environment value was visible
 Child process              ALLOW       child process executed
 Network egress             SKIP        network probe disabled
-Docker socket              N/A         socket not configured
-SSH agent socket           N/A         socket not configured
+Docker socket              SKIP        socket probing disabled
+SSH agent socket           SKIP        socket probing disabled
 
 Blast-radius exposures
 • Outside-workspace read
@@ -65,7 +78,8 @@ It currently checks:
 - connectability of the Docker Unix socket when the host process can connect to it
 - connectability of the configured SSH-agent Unix socket when the host process can connect to it
 
-The network check opens a TCP connection only. Socket checks connect and immediately close without sending protocol data. No canary or credential data is transmitted. Use `--no-network` to skip external network probing.
+The network check opens a TCP connection only. Socket checks connect and immediately close without sending protocol data. No canary or credential data is transmitted. Use `--no-network` to skip the external TCP check and `--no-sockets` to skip
+Docker/SSH-agent socket discovery and connection checks. Both are disabled in `demo`.
 
 ## Why this is different
 
