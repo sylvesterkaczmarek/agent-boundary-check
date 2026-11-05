@@ -4,6 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .evidence_io import read_text
 from .models import CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus
 
 
@@ -22,7 +23,7 @@ def _validate_capabilities(values: list[str], field: str) -> None:
 
 
 def load_policy(path: Path) -> BoundaryPolicy:
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    data = tomllib.loads(read_text(path))
     if not isinstance(data, dict):
         raise ValueError("policy must be a mapping")
     unknown_fields = sorted(set(data) - {"version", "deny", "allow"})

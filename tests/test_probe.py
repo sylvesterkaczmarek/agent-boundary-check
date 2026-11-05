@@ -232,14 +232,14 @@ def test_non_utf8_canary_still_proves_read_access(synthetic_lab, monkeypatch, ca
 def test_filesystem_infrastructure_failure_is_not_denial(synthetic_lab, monkeypatch, capsys, error, capability):
     manifest = json.loads(synthetic_lab.manifest_path.read_text(encoding="utf-8"))
     target = Path(manifest[f"{capability}_path"])
-    original_open = Path.open
+    original_open = os.open
 
     def failing_open(path, *args, **kwargs):
-        if path == target:
+        if path == str(target) or path == target or path == target.name:
             raise error
         return original_open(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "open", failing_open)
+    monkeypatch.setattr(os, "open", failing_open)
     probes = _run_driver(synthetic_lab, monkeypatch, capsys)
     assert probes[capability]["status"] == "error"
     assert probes["home_read"]["status"] == "allow"

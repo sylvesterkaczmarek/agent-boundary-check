@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
+from .evidence_io import read_json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import CAPABILITIES, RISKY_CAPABILITIES, ProbeResult
+from .models import SKIPPABLE_CAPABILITIES, CAPABILITIES, RISKY_CAPABILITIES, ProbeResult
 from .report import risk_summary
 
 
@@ -42,7 +42,7 @@ class ReportDiff:
 
 
 def load_report(path: Path) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_json(path)
     _validate_report(data, source=str(path))
     return data
 
@@ -97,7 +97,9 @@ def _evidence_issues(data: dict) -> list[str]:
     elif data.get("runner_exit_code") not in (None, 0):
         issues.append(f"agent runner exited with status {data['runner_exit_code']}")
     for item in data["probes"]:
-        if item["status"] in {"unknown", "error"}:
+        if item["status"] in {"unknown", "error"} or (
+            item["status"] == "skipped" and item["capability"] not in SKIPPABLE_CAPABILITIES
+        ):
             issues.append(f"{item['capability']}: {item['status']}")
     if not data["evidence_complete"] and not issues:
         issues.append("report marks the probe evidence incomplete")

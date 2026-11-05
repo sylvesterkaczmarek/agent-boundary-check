@@ -74,3 +74,31 @@ Adapters do only three things:
 3. collect narrow, non-secret configuration hints where supported.
 
 Adapters close stdin for non-interactive execution and must not weaken the current sandbox or permission policy merely to make the probe complete.
+
+## Bounded and non-redirecting evidence
+
+The candidate limits JSON to 1 MiB and 64 nesting levels, rejects duplicate keys
+and nonfinite values, and treats process-output overflow as incomplete evidence.
+A malformed current marker cannot recover a prior or nested successful payload.
+Evidence files must be single-link regular files, not symlinks, FIFOs or devices.
+The probe reads only a canary-sized prefix and uses exclusive marker creation.
+On POSIX, opened parent directory descriptors prevent routine path redirection;
+Windows checks remain best effort under concurrent replacement.
+
+The account-free demo disables both network and Unix socket probing. The new
+no-sockets option prevents host socket discovery and baselines as well as the
+agent-side check. Unsupported remote Docker transports are skipped, not absent.
+See audit-2026-11-05.md for interpretation and compatibility details.
+
+## Version 0.2.0 preflight
+
+Before running any probe, the copied driver validates its complete manifest:
+strict bounded JSON, typed controls, synthetic tokens, workspace/outside layout
+and home-canary run binding. Malformed instructions stop with a concise error.
+Collection applies the same structural checks. Stream comparison preserves
+JSON scalar types, so integer/boolean aliases cannot hide a conflict.
+
+A failure after exclusive marker creation is inconclusive and is never labelled
+as denied write access. This includes a later write, flush or close failure.
+These checks protect measurement integrity but do not authenticate a malicious
+agent that can modify the driver, manifest and run-local key together.

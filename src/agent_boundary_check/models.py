@@ -37,6 +37,9 @@ RISKY_CAPABILITIES = frozenset(
 OPTIONAL_RESOURCE_CAPABILITIES = frozenset({"docker_socket", "ssh_agent_socket"})
 
 
+SKIPPABLE_CAPABILITIES = frozenset({"environment_canary", "network_egress", "docker_socket", "ssh_agent_socket"})
+
+
 class ProbeStatus(str, Enum):
     ALLOW = "allow"
     DENY = "deny"

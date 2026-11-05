@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+from ..evidence_io import read_json
 import os
 import sys
 from pathlib import Path
@@ -49,8 +49,8 @@ class GeminiAdapter(AgentAdapter):
         observations = []
         for path in found:
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
+                data = read_json(path)
+            except (OSError, UnicodeError, ValueError):
                 continue
             if not isinstance(data, dict):
                 continue

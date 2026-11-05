@@ -8,7 +8,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .models import CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus, RunReport
+from . import evidence_io
+
+from .models import SKIPPABLE_CAPABILITIES, CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus, RunReport
 from .policy import BoundaryPolicy, evaluate_policy
 
 RESULT_PREFIX = "AGENT_BOUNDARY_RESULT="
@@ -28,7 +30,7 @@ _ALLOWED_TOP_LEVEL = {"schema_version", "run_id", "probe_platform", "probes", "a
 
 
 def _parse_probe_output(output: str) -> tuple[bool, dict | None]:
-    decoder = json.JSONDecoder()
+    decoder = evidence_io.decoder()
     latest = None
     saw_marker = False
     cursor = 0
@@ -44,32 +46,45 @@ def _parse_probe_output(output: str) -> tuple[bool, dict | None]:
             # Advance past the complete object, so marker text inside a probe
             # detail cannot be mistaken for a newer result.
             data, cursor = decoder.raw_decode(output, cursor)
+            evidence_io.validate_tree(data)
             if isinstance(data, dict):
                 latest = data
-        except json.JSONDecodeError:
-            continue
+        except (ValueError, UnicodeError, RecursionError):
+            # A malformed object has no reliable end boundary; do not search
+            # inside it for a second marker that could turn it into success.
+            return True, None
     return saw_marker, latest
 
 
 def parse_probe_payload(results_path: Path, stdout: str, *, stderr: str = "") -> dict | None:
     # The process result belongs to the current execution. A retained result
     # file can belong to an earlier execution, especially when a write failed.
+    try:
+        evidence_io.check_size(stdout)
+        evidence_io.check_size(stderr)
+    except (ValueError, UnicodeError):
+        return None
     stdout_marker, stdout_payload = _parse_probe_output(stdout)
     stderr_marker, stderr_payload = _parse_probe_output(stderr)
     if stdout_marker and stderr_marker:
         # Separately captured streams have no shared chronological order.
         # Conflicting or malformed results cannot establish the current state.
-        return stdout_payload if stdout_payload == stderr_payload else None
+        if stdout_payload is None or stderr_payload is None:
+            return None
+        # Python treats 1, 1.0 and True as equal. Evidence schemas do not.
+        left = json.dumps(stdout_payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        right = json.dumps(stderr_payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return stdout_payload if left == right else None
     if stdout_marker:
         return stdout_payload
     if stderr_marker:
         return stderr_payload
     if results_path.exists():
         try:
-            data = json.loads(results_path.read_text(encoding="utf-8"))
+            data = evidence_io.read_json(results_path, strict_parents=True)
             if isinstance(data, dict):
                 return data
-        except (OSError, UnicodeError, json.JSONDecodeError):
+        except (OSError, ValueError, UnicodeError):
             pass
     return None
 
@@ -89,6 +104,10 @@ def _validate_payload(
         return _unknown_probes("probe result was not produced"), None, "probe result was not produced"
     if not isinstance(payload, dict):
         return _unknown_probes("probe payload was invalid"), None, "probe payload must be an object"
+    try:
+        evidence_io.validate_tree(payload)
+    except (ValueError, UnicodeError, RecursionError):
+        return _unknown_probes("probe payload was invalid"), None, "invalid or excessively nested probe payload"
     if set(payload) - _ALLOWED_TOP_LEVEL:
         extra = ", ".join(sorted(set(payload) - _ALLOWED_TOP_LEVEL))
         return _unknown_probes("probe payload contained unexpected fields"), None, f"unexpected probe payload fields: {extra}"
@@ -119,6 +138,8 @@ def _validate_payload(
     try:
         for item in raw_probes:
             probe = ProbeResult.from_dict(item)
+            if probe.status == ProbeStatus.SKIPPED and probe.capability not in SKIPPABLE_CAPABILITIES:
+                raise ValueError(f"{probe.capability}: a mandatory probe was skipped")
             if probe.capability in parsed:
                 raise ValueError(f"duplicate probe capability: {probe.capability}")
             parsed[probe.capability] = probe
@@ -152,6 +173,7 @@ def risk_summary(probes: list[ProbeResult]) -> tuple[str, list[str]]:
         return "UNKNOWN", exposures
     if any(
         p.status in {ProbeStatus.UNKNOWN, ProbeStatus.ERROR}
+        or (p.status == ProbeStatus.SKIPPED and p.capability not in SKIPPABLE_CAPABILITIES)
         or (p.status == ProbeStatus.ABSENT and p.capability not in OPTIONAL_RESOURCE_CAPABILITIES)
         for p in probes
     ):
@@ -173,6 +195,7 @@ def make_report(
     timed_out: bool,
     runner_output: str,
     attestation_key: str | None = None,
+    output_limited: bool = False,
 ) -> RunReport:
     probes, probe_platform, payload_error = _validate_payload(
         payload,
@@ -180,6 +203,8 @@ def make_report(
         attestation_key=attestation_key,
     )
     errors = [payload_error] if payload_error else []
+    if output_limited:
+        errors.append("agent output exceeded the capture limit; evidence is incomplete")
     if timed_out:
         errors.append("agent runner timed out")
     elif exit_code not in (None, 0):

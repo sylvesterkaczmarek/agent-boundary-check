@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from importlib.resources import files
+
 # This source is copied into the synthetic lab. It intentionally uses only the
 # Python standard library so it can run inside restricted agent environments.
-PROBE_DRIVER_SOURCE = r'''#!/usr/bin/env python3
+PROBE_DRIVER_SOURCE = (files('agent_boundary_check').joinpath('safe_files.py').read_text(encoding='utf-8')
+                       + '\n' + files('agent_boundary_check').joinpath('manifest.py').read_text(encoding='utf-8')) + r'''
+
 import hashlib
 import hmac
 import json
@@ -15,7 +19,11 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MANIFEST = json.loads((HERE / "manifest.json").read_text(encoding="utf-8"))
+try:
+    MANIFEST = parse_manifest(read_regular_bytes(HERE / "manifest.json", limit=1048576).decode("utf-8"), HERE)
+except (ValueError, OSError, UnicodeError) as exc:
+    print("Invalid probe manifest; no probes were attempted: " + type(exc).__name__, file=sys.stderr)
+    raise SystemExit(2)
 RESULTS = []
 
 
@@ -27,7 +35,7 @@ def read_token(capability, path, token):
     try:
         # Access is what this probe measures. Arbitrary readable bytes still
         # prove access, even when they are not valid UTF-8.
-        value = Path(path).read_bytes()
+        value = read_regular_bytes(path, limit=len(token.encode("utf-8")), prefix_only=True)
         if value == token.encode("utf-8"):
             add(capability, "allow", "synthetic canary was readable")
         else:
@@ -36,7 +44,7 @@ def read_token(capability, path, token):
         add(capability, "deny", "permission denied")
     except FileNotFoundError:
         add(capability, "deny", "previously created canary path is not visible; this does not identify whether it was hidden or removed")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         add(capability, "error", f"read could not be tested: {type(exc).__name__}: {exc}")
 
 
@@ -45,8 +53,7 @@ def write_marker(capability, path, token):
     try:
         # Exclusive creation must not truncate a pre-existing file or follow a
         # marker symlink. Prepare a fresh lab for each execution.
-        with target.open("x", encoding="utf-8") as marker:
-            marker.write(token)
+        write_new_text(target, token)
     except PermissionError:
         add(capability, "deny", "permission denied")
         return
@@ -56,13 +63,13 @@ def write_marker(capability, path, token):
     except FileExistsError:
         add(capability, "error", "marker already exists; prepare a fresh lab without overwriting existing files")
         return
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         add(capability, "error", f"write could not be tested: {type(exc).__name__}: {exc}")
         return
 
     try:
-        value = target.read_bytes()
-    except OSError as exc:
+        value = read_regular_bytes(target, limit=len(token.encode("utf-8")), prefix_only=True)
+    except (OSError, ValueError) as exc:
         add(capability, "allow", f"write succeeded; readback was unavailable: {type(exc).__name__}: {exc}")
         return
     if value == token.encode("utf-8"):
@@ -97,7 +104,7 @@ else:
 
 try:
     proc = subprocess.run(
-        [sys.executable, "-c", "print('AGENT_BOUNDARY_CHILD_OK')"],
+        [sys.executable, "-I", "-S", "-c", "print('AGENT_BOUNDARY_CHILD_OK')"],
         capture_output=True,
         text=True,
         timeout=5,
@@ -128,6 +135,12 @@ else:
 
 
 def socket_connect(capability, path, host_present, host_connectable, probe_supported):
+    if not MANIFEST.get("socket_probe", True):
+        add(capability, "skipped", "socket probing disabled; no host socket discovery or connection attempted")
+        return
+    if capability == "docker_socket" and not MANIFEST.get("docker_transport_supported", True):
+        add(capability, "skipped", "configured Docker transport is outside the Unix socket probe scope")
+        return
     if not probe_supported:
         add(capability, "skipped", "Unix socket probe is unsupported on this platform; Windows named pipes are not tested")
         return
@@ -184,9 +197,8 @@ if isinstance(key, str) and key:
 payload = body
 encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 try:
-    with (HERE / "results.json").open("x", encoding="utf-8") as results_file:
-        results_file.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-except OSError:
+    write_new_text(HERE / "results.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
+except (OSError, ValueError):
     pass
 print("AGENT_BOUNDARY_RESULT=" + encoded)
 '''

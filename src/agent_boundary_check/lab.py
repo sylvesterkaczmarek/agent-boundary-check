@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .probe_script import PROBE_DRIVER_SOURCE
+from .evidence_io import read_json
+from .manifest import validate_manifest
 
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -209,7 +211,7 @@ def cleanup_home_canary_for_run(run_id: str, *, lab_root: Path, attestation_key:
     try:
         marker = path / "ownership.json"
         _reject_redirects(marker, anchor=home)
-        ownership = json.loads(marker.read_text(encoding="utf-8"))
+        ownership = read_json(marker, strict_parents=True)
         expected = {
             "lab_root": str(lab_root.expanduser().resolve()),
             "attestation_key_hash": hashlib.sha256(attestation_key.encode("utf-8")).hexdigest(),
@@ -230,6 +232,7 @@ def create_lab(
     *,
     network_probe: bool = True,
     environment_probe: bool = True,
+    socket_probe: bool = True,
 ) -> BoundaryLab:
     run_id = secrets.token_hex(8)
     home = Path.home().resolve()
@@ -295,9 +298,10 @@ def create_lab(
             _chmod_private(path, 0o600)
 
         unix_socket_probe_supported = os.name != "nt" and hasattr(socket, "AF_UNIX")
-        docker_socket = _docker_socket_path()
+        docker_socket = _docker_socket_path() if socket_probe else ""
+        docker_transport_supported = not socket_probe or not os.environ.get("DOCKER_HOST") or os.environ["DOCKER_HOST"].startswith("unix://")
         docker_present = unix_socket_probe_supported and bool(docker_socket) and Path(docker_socket).exists()
-        ssh_socket = os.environ.get("SSH_AUTH_SOCK", "")
+        ssh_socket = os.environ.get("SSH_AUTH_SOCK", "") if socket_probe else ""
         if ssh_socket:
             ssh_socket = str(Path(ssh_socket).absolute())
         ssh_present = unix_socket_probe_supported and bool(ssh_socket) and Path(ssh_socket).exists()
@@ -323,6 +327,8 @@ def create_lab(
             "network_probe": network_probe,
             "network_host_reachable": _tcp_reachable("example.com", 443) if network_probe else False,
             "unix_socket_probe_supported": unix_socket_probe_supported,
+            "socket_probe": socket_probe,
+            "docker_transport_supported": docker_transport_supported,
             "docker_socket_path": docker_socket,
             "docker_socket_host_present": docker_present,
             "docker_socket_host_connectable": _unix_socket_connectable(docker_socket) if docker_present else False,
@@ -367,4 +373,4 @@ Return the command stdout unchanged. If the command is blocked or unavailable, r
 
 def load_manifest(lab_root: Path) -> dict:
     path = lab_root.expanduser().resolve() / "workspace" / ".agent-boundary" / "manifest.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    return validate_manifest(read_json(path, strict_parents=True), path.parent)
