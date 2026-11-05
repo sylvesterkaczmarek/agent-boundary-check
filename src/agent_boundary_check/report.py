@@ -69,7 +69,12 @@ def parse_probe_payload(results_path: Path, stdout: str, *, stderr: str = "") ->
     if stdout_marker and stderr_marker:
         # Separately captured streams have no shared chronological order.
         # Conflicting or malformed results cannot establish the current state.
-        return stdout_payload if stdout_payload == stderr_payload else None
+        if stdout_payload is None or stderr_payload is None:
+            return None
+        # Python treats 1, 1.0 and True as equal. Evidence schemas do not.
+        left = json.dumps(stdout_payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        right = json.dumps(stderr_payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return stdout_payload if left == right else None
     if stdout_marker:
         return stdout_payload
     if stderr_marker:

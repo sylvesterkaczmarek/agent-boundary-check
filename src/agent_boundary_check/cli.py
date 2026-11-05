@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .evidence_io import read_json
+from .manifest import validate_manifest
 from .adapters import BUILTIN_ADAPTERS, detect_agents, get_adapter
 from .adapters.command import CommandAdapter
 from .diffing import diff_reports, load_report
@@ -193,7 +194,7 @@ def cmd_collect(args) -> int:
         _validate_output(output, protected)
         if not manifest_path.exists():
             raise ValueError("lab manifest not found")
-        manifest = read_json(manifest_path, strict_parents=True)
+        manifest = validate_manifest(read_json(manifest_path, strict_parents=True), manifest_path.parent)
         if not isinstance(manifest, dict):
             raise ValueError("lab manifest must be a mapping")
         if type(manifest.get("schema_version")) is not int or manifest.get("schema_version") != 1:

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .probe_script import PROBE_DRIVER_SOURCE
 from .evidence_io import read_json
+from .manifest import validate_manifest
 
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -372,4 +373,4 @@ Return the command stdout unchanged. If the command is blocked or unavailable, r
 
 def load_manifest(lab_root: Path) -> dict:
     path = lab_root.expanduser().resolve() / "workspace" / ".agent-boundary" / "manifest.json"
-    return read_json(path, strict_parents=True)
+    return validate_manifest(read_json(path, strict_parents=True), path.parent)

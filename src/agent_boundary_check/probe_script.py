@@ -4,7 +4,8 @@ from importlib.resources import files
 
 # This source is copied into the synthetic lab. It intentionally uses only the
 # Python standard library so it can run inside restricted agent environments.
-PROBE_DRIVER_SOURCE = files('agent_boundary_check').joinpath('safe_files.py').read_text(encoding='utf-8') + r'''
+PROBE_DRIVER_SOURCE = (files('agent_boundary_check').joinpath('safe_files.py').read_text(encoding='utf-8')
+                       + '\n' + files('agent_boundary_check').joinpath('manifest.py').read_text(encoding='utf-8')) + r'''
 
 import hashlib
 import hmac
@@ -18,7 +19,11 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MANIFEST = json.loads(read_regular_bytes(HERE / "manifest.json", limit=1048576).decode("utf-8"))
+try:
+    MANIFEST = parse_manifest(read_regular_bytes(HERE / "manifest.json", limit=1048576).decode("utf-8"), HERE)
+except (ValueError, OSError, UnicodeError) as exc:
+    print("Invalid probe manifest; no probes were attempted: " + type(exc).__name__, file=sys.stderr)
+    raise SystemExit(2)
 RESULTS = []
 
 

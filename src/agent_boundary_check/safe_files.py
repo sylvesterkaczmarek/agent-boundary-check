@@ -74,8 +74,13 @@ def write_new_text(path, text):
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_CLOEXEC', 0)
     with _parent_descriptor(path) as (name, directory):
         fd = _leaf_open(name, directory, flags)
-        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise ValueError('marker must be a singly linked regular file')
-            handle.write(text)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as handle:
+                info = os.fstat(handle.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError('marker must be a singly linked regular file')
+                handle.write(text)
+        except OSError as exc:
+            # Creation has already succeeded. A later write/flush failure must
+            # not be confused with a permission denial at the open boundary.
+            raise ValueError('marker was created but its content write did not complete') from exc
