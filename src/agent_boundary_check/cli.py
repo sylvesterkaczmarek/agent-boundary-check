@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from . import __version__
+from .calibration import DEFAULT_BUNDLE, replay
 from .evidence_io import read_json
 from .manifest import validate_manifest
 from .adapters import BUILTIN_ADAPTERS, detect_agents, get_adapter
@@ -296,6 +297,11 @@ def cmd_diff(args) -> int:
     return 1 if result.has_new_exposure or result.after_policy_violations or review else 0
 
 
+def cmd_replay(args: argparse.Namespace) -> int:
+    replay(args.bundle, summary=not args.json)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-boundary",
@@ -321,6 +327,12 @@ def build_parser() -> argparse.ArgumentParser:
     demo = sub.add_parser("demo", help="run a deterministic local demo without an AI account")
     demo.add_argument("--json", help="write machine-readable report")
     demo.set_defaults(func=cmd_demo)
+
+    replay_p = sub.add_parser("replay", help="rescore recorded calibration trials offline")
+    replay_p.add_argument("bundle", type=Path, nargs="?", default=DEFAULT_BUNDLE,
+                          help="calibration JSON file (default: bundled Codex 0.171.0 macOS trials)")
+    replay_p.add_argument("--json", action="store_true", help="print counts, rates and uncertainty as JSON")
+    replay_p.set_defaults(func=cmd_replay)
 
     prepare = sub.add_parser("prepare", help="prepare a manual lab for unsupported or GUI coding agents")
     prepare.add_argument("--output", required=True, help="empty directory to create")

@@ -51,7 +51,7 @@ jobs:
         run: |
           git archive --format=zip --output=proof/source.zip HEAD
           cp "docs/release-${VERSION}.md" proof/RELEASE_NOTES.md
-          cp docs/independent-review-2026-11-05.md proof/INDEPENDENT_REVIEW.md
+          cp verification/codex-calibration-0.171.0-macos.json proof/CALIBRATION.json
           printf '%s\n' "$GITHUB_SHA" > proof/COMMIT.txt
           python - <<'PY'
           from pathlib import Path

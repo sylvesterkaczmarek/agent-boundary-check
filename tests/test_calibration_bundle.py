@@ -64,3 +64,37 @@ def test_different_checker_versions_cannot_be_pooled():
     bundle["samples"][-1]["report"]["checker_version"] = "other"
     with pytest.raises(ValueError, match="checker version"):
         score(bundle)
+
+
+def test_installed_reference_inputs_match_originals():
+    from agent_boundary_check.calibration import DEFAULT_BUNDLE, REFERENCE
+
+    for filename in ("design.json", "policy.toml"):
+        assert (REFERENCE / filename).read_bytes() == (ROOT / "examples/calibration" / filename).read_bytes()
+    assert DEFAULT_BUNDLE.read_bytes() == (ROOT / "verification" / DEFAULT_BUNDLE.name).read_bytes()
+
+
+def test_offline_replay_from_empty_directory(monkeypatch, tmp_path, capsys):
+    from agent_boundary_check.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["replay"]) == 0
+    summary = capsys.readouterr().out
+    for case, verdict in (("allowed", "VIOLATION"), ("denied", "PASS"),
+                          ("missing", "INCONCLUSIVE"), ("denied_repeat", "PASS")):
+        assert any(line.split() == ["trial", "1", case, verdict] for line in summary.splitlines())
+    assert main(["replay", "--json"]) == 0
+    metrics = json.loads(capsys.readouterr().out)["methods"]["observer"]
+    assert metrics["intact_case_coverage"]["count"] == metrics["intact_case_coverage"]["n"] == 3
+    assert metrics["false_pass_on_missing_control"]["count"] == 0
+
+
+def test_replay_rejects_incomplete_user_bundle(tmp_path, capsys):
+    from agent_boundary_check.cli import main
+
+    bundle = tmp_path / "incomplete.json"
+    bundle.write_text('{"samples":[]}', encoding="utf-8")
+    assert main(["replay", str(bundle)]) == 2
+    output = capsys.readouterr()
+    assert "error:" in output.err
+    assert not output.out

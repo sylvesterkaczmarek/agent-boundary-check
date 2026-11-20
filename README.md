@@ -1,6 +1,6 @@
 # Agent Boundary Check
 
-![Agent Boundary Check](assets/social/github-social-card-agent-boundary-check.png)
+![Agent Boundary Check](https://raw.githubusercontent.com/sylvesterkaczmarek/agent-boundary-check/v0.3.0/assets/social/github-social-card-agent-boundary-check.png)
 
 [![CI](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml/badge.svg)](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/agent-boundary-check.svg)](https://pypi.org/project/agent-boundary-check/)
@@ -11,34 +11,32 @@ Agent Boundary Check measures what code launched by an AI coding agent can read,
 
 ## Reproduce the pilot result
 
-A missing test file once made the checker report that an unsandboxed process was correctly denied access. The published v0.2.0 passed that policy check. The current checker returned `INCONCLUSIVE` for the missing file and correctly classified all three intact trials. Two pinned versions of the Codex sandbox command produced the four expected outcomes on hosted macOS.
+A missing test file once made the checker report that an unsandboxed process was correctly denied access. The published v0.2.0 passed that policy check. The 0.3.0 development build returned `INCONCLUSIVE` for the missing file and correctly classified all three intact trials. Two pinned versions of the Codex sandbox command produced the four expected outcomes on hosted macOS.
 
 Replay one of the original macOS datasets with Python 3.11 or later. From a fresh Python environment:
 
 ```sh
-git clone https://github.com/sylvesterkaczmarek/agent-boundary-check.git
-cd agent-boundary-check
-python -m pip install .
-python scripts/score_calibration.py verification/codex-calibration-0.171.0-macos.json --summary
+python -m pip install agent-boundary-check==0.3.0
+agent-boundary replay
 ```
 
-The replay runs offline after installation and needs no agent account. Look for `allowed → VIOLATION`, `denied → PASS`, `missing → INCONCLUSIVE` and `denied_repeat → PASS`. The contract forbids the outside read, so a successful read is a policy violation. The pilot used four designed cases per version. End-to-end measurements for model-backed agents and independent replication remain open.
+The wheel includes the original Codex 0.171.0 trial records. Replay runs offline and needs no agent account. Add `--json` to see counts, denominators and descriptive intervals. Look for `allowed → VIOLATION`, `denied → PASS`, `missing → INCONCLUSIVE` and `denied_repeat → PASS`. The contract forbids the outside read, so a successful read is a policy violation. The pilot used four designed cases per version. End-to-end measurements for model-backed agents and independent replication remain open.
 
-[Study protocol and reference reports](docs/file-permission-pilot.md) · [Hosted trial records](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/runs/44830101830) · [Report schema](examples/calibration/report-v2.schema.json)
+[Study protocol and reference reports](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/file-permission-pilot.md) · [Hosted trial records](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/runs/44830101830) · [Report schema](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/examples/calibration/report-v2.schema.json)
 
 ## Run it on your agent
 
-The account-free `demo` shows the local synthetic probe. For an installed and configured coding agent, supply its CLI name and the policy you want to check:
+The account-free `demo` shows the local synthetic probe. To compare two runs through your configured Codex CLI, save the [example policy](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/examples/strict-policy.toml) as `team-policy.toml` in your current directory.
 
 ```sh
 agent-boundary demo
-agent-boundary verify codex --policy examples/strict-policy.toml --json baseline.json
+agent-boundary verify codex --policy team-policy.toml --json baseline.json
 # After the upgrade, collect a fresh run with the same policy.
-agent-boundary verify codex --policy examples/strict-policy.toml --json candidate.json
-agent-boundary diff baseline.json candidate.json --policy examples/strict-policy.toml
+agent-boundary verify codex --policy team-policy.toml --json candidate.json
+agent-boundary diff baseline.json candidate.json --policy team-policy.toml
 ```
 
-The core CLI uses only the Python standard library. Source installs include the host checks and policy-aware comparison described here. [Report interpretation](docs/report-v2.md) · [Inspect integration](docs/file-permission-pilot.md#replay-in-inspect)
+The core CLI uses only the Python standard library. [Report interpretation](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/report-v2.md) · [Inspect integration](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/file-permission-pilot.md#replay-in-inspect)
 
 ## What it measures
 
@@ -78,11 +76,11 @@ Automatic runners are included for:
 
 The built-in adapters deliberately do not add permission-bypass, sandbox-bypass or YOLO flags. They exercise the agent with its current configuration.
 
-For GUI agents or unsupported CLIs, use the manual `prepare` / `collect` flow. See [`docs/supported-agents.md`](docs/supported-agents.md).
+For GUI agents or unsupported CLIs, use the manual `prepare` / `collect` flow. See [`docs/supported-agents.md`](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/supported-agents.md).
 
 ## Installation options
 
-Use the source installation above for the current checker and research results. The versioned [PyPI release](https://pypi.org/project/agent-boundary-check/0.2.0/) is the historical baseline for the pilot. Its [release notes](docs/release-0.2.0.md) describe the earlier report format.
+Install from [PyPI](https://pypi.org/project/agent-boundary-check/0.3.0/) with Python 3.11 or later. For the study scripts and all five reference bundles, use the [v0.3.0 source archive](https://github.com/sylvesterkaczmarek/agent-boundary-check/archive/refs/tags/v0.3.0.zip). The pilot used [v0.2.0](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/release-0.2.0.md) as its historical baseline.
 
 ## Manual mode
 
@@ -152,7 +150,7 @@ Agent Boundary Check is designed to test boundaries without touching genuine sec
 8. home-directory canaries are removed after automatic verification or successful collection, with ownership checks before cleanup;
 9. raw secret values are not collected from the host.
 
-See [`docs/threat-model.md`](docs/threat-model.md).
+See [`docs/threat-model.md`](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/threat-model.md).
 
 ## What the result means
 
@@ -204,7 +202,7 @@ agent-boundary-check/
 
 ## Cite this repository
 
-For the published sandbox pilot, cite the software and identify the [measurement revision](https://github.com/sylvesterkaczmarek/agent-boundary-check/tree/d4da506df2356998c27b030080d34cb2903cd70c), dataset filename and CLI version. The machine-readable [software citation](CITATION.cff) identifies the tagged release. For new measurements record the checker revision you actually ran.
+For the published sandbox pilot, cite the software and identify the [measurement revision](https://github.com/sylvesterkaczmarek/agent-boundary-check/tree/d4da506df2356998c27b030080d34cb2903cd70c), dataset filename and CLI version. The machine-readable [software citation](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/CITATION.cff) identifies the tagged release. For new measurements record the checker revision you actually ran.
 
 > Kaczmarek, S. (2026). *Agent Boundary Check*. GitHub. https://github.com/sylvesterkaczmarek/agent-boundary-check
 
@@ -219,6 +217,6 @@ For the published sandbox pilot, cite the software and identify the [measurement
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/LICENSE).
 
 © **Sylvester Kaczmarek** · [https://www.sylvesterkaczmarek.com](https://www.sylvesterkaczmarek.com)

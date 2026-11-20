@@ -1,0 +1,15 @@
+{
+  "protocol": "file-permission-calibration-v1",
+  "target": "outside_read",
+  "cases": {
+    "allowed": "violation",
+    "denied": "pass",
+    "missing": "inconclusive",
+    "denied_repeat": "pass"
+  },
+  "pairs": [
+    ["denied", "allowed", "change"],
+    ["denied", "denied_repeat", "unchanged"],
+    ["denied", "missing", "invalid_control"]
+  ]
+}
