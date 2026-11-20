@@ -70,8 +70,12 @@ def run_case(case, root, runner, executable, version):
             source.rename(root / "parked-canary")
         try:
             proc = subprocess.run(cmd, cwd=lab.workspace, env=env, stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45)
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=45)
             runner_status = "completed" if proc.returncode == 0 else "runner_failed"
+            if proc.returncode:
+                # This runner invokes only the fixed local driver, without inference.
+                print(f"{case}: launcher exit {proc.returncode}: "
+                      f"{ascii(proc.stderr.decode(errors='replace')[-300:])}", file=sys.stderr)
         except subprocess.TimeoutExpired:
             runner_status = "timed_out"
         finally:

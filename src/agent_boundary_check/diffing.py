@@ -60,7 +60,9 @@ def _validate_report(data: dict, *, source: str) -> None:
     ):
         raise ValueError(f"unsupported report schema: {source}")
     if data["schema_version"] == 2:
-        for key in ("tool_path", "checker_version", "fixture_profile"):
+        if data.get("fixture_profile") != "shared-files-v1":
+            raise ValueError(f"unknown fixture profile: {source}")
+        for key in ("run_id", "platform", "tool_path", "checker_version", "fixture_profile"):
             if not isinstance(data.get(key), str) or not data[key].strip():
                 raise ValueError(f"missing {key}: {source}")
         validate_observations(data.get("host_observations"))
@@ -165,11 +167,15 @@ def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = N
     after_v2 = after["schema_version"] == 2
     if before_v2 != after_v2:
         after_issues.append("legacy report lacks policy, tool and fixture provenance")
+    comparable = before_v2 == after_v2
+    if not before_v2 and not after_v2 and before.get("policy_violations") and not after.get("policy_violations"):
+        after_issues.append("historical policy changed or violation resolved; legacy provenance unavailable")
     if before_v2 and after_v2:
         if before["policy"] != after["policy"]:
             after_issues.append("applied policy changed or was omitted")
         for field in ("tool_path", "fixture_profile", "agent", "platform", "probe_platform"):
             if before.get(field) != after.get(field):
+                comparable = False
                 after_issues.append(f"{field} changed; confirm comparability in a matched run")
     if policy is not None:
         required = policy_record(policy)
@@ -190,8 +196,8 @@ def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = N
         if old == new and old_reason == new_reason:
             continue
         allowed = capability in RISKY_CAPABILITIES and new == "allow"
-        changes.append(CapabilityChange(capability, old, new, allowed and old == "deny",
-                                        allowed and old != "deny", old_reason, new_reason))
+        changes.append(CapabilityChange(capability, old, new, allowed and old == "deny" and comparable,
+                                        allowed and (old != "deny" or not comparable), old_reason, new_reason))
         if old in {"allow", "deny", "absent"} and new == "skipped":
             after_issues.append(f"{capability}: previously measured capability is now skipped")
     before_violations = _violations(before, policy)

@@ -1,7 +1,6 @@
 """Score the original driver states with the installed 0.2.0 policy evaluator."""
 import argparse
 from importlib.metadata import version
-import json
 from pathlib import Path
 
 from agent_boundary_check.evidence_io import read_json

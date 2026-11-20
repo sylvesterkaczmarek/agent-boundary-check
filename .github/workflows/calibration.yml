@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   calibration:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
