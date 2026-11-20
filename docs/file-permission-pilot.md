@@ -56,6 +56,8 @@ python scripts/run_pinned_agent.py --agent codex --executable "$(command -v code
 agent-boundary diff baseline.json candidate.json --policy team-policy.toml
 ```
 
+A [full Codex CLI attempt](../verification/full-codex-inconclusive.json) with version 0.172.0-alpha.2 returned runner exit 1 without probe evidence on the restricted host. The successful hosted trials above exercised the sandbox-command route.
+
 Use a fresh output path for the second pinned version. Record the model, effective approval mode, OS image and applicable project settings with the pair. A synthetic workspace may have different project-local settings. Keep within-platform and within-tool comparisons separate. A refusal, missing dependency or unsupported route stays in the study denominator. The automatic runner exercises its Python command path. Native file editors require a separate ground-truth protocol before comparison. Only collect reports that the team is authorised to share.
 
 ## Decision rule for a held-out study
@@ -69,7 +71,7 @@ A replication should use a separate operator and host, a pinned checker revision
 Install the optional integration with `python -m pip install '.[inspect]'`. Inspect takes absolute paths in this example because it runs task files relative to their own directory.
 
 ```sh
-inspect eval examples/inspect_boundary.py@boundary_replay --model mockllm/model \
+inspect eval agent_boundary_check/boundary_replay --model mockllm/model \
   -T before="$PWD/baseline.json" -T after="$PWD/candidate.json" -T policy="$PWD/team-policy.toml"
 ```
 

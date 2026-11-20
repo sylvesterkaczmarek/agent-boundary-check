@@ -34,6 +34,9 @@ dev = [
 [project.scripts]
 agent-boundary = "agent_boundary_check.cli:main"
 
+[project.entry-points.inspect_ai]
+agent_boundary_check = "agent_boundary_check.inspect_replay"
+
 [project.urls]
 Homepage = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
 Repository = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
