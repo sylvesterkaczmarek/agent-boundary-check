@@ -26,7 +26,17 @@ python scripts/run_calibration.py --runner codex-sandbox --expect-version "codex
 
 Output paths must be new. Use `--repeats N` for fresh repetitions. The account-free Codex arm runs the installed sandbox command directly. It measures that execution route. The GitHub Actions workflow pins two Codex versions, checks the observed controls and retains reports even when a launcher fails. Restricted hosts can forbid sandbox initialisation.
 
-The reference Linux/Python 3.12 run produced the expected verdict on all four cases. Its missing fixture generated one incorrect pass under the status-only rule and an inconclusive verdict with host observation. Both methods decided all three intact trials. Four additional Codex sandbox trials from a host that prohibited sandbox setup are included so failed measurements remain visible. These four-condition demonstrations do not estimate production error rates.
+The reference Linux/Python 3.12 run produced the expected verdict on all four cases. Its missing fixture generated one incorrect pass under the status-only rule and an inconclusive verdict with host observation. Both methods decided all three intact trials. Two pinned Codex versions also completed the four cases on hosted macOS. Each version returned a violation for the allowed read, passed both genuine denials and returned inconclusive for the lost fixture. All eight observer-location checks passed. Four additional Codex sandbox trials from a host that prohibited sandbox setup remain visible.
+
+| Reference bundle | Scorable trials | Missing fixture |
+| --- | --- | --- |
+| [Original 0.2.0, Linux](../verification/calibration-legacy.json) | 4 of 4 | Incorrect policy pass |
+| [Development checker, Linux](../verification/calibration-local.json) | 3 of 4 | Inconclusive |
+| [Codex sandbox 0.171.0, macOS](../verification/codex-calibration-0.171.0-macos.json) | 3 of 4 | Inconclusive |
+| [Codex sandbox 0.172.0-alpha.2, macOS](../verification/codex-calibration-0.172.0-alpha.2-macos.json) | 3 of 4 | Inconclusive |
+| [Codex sandbox on restricted Linux](../verification/calibration-codex-restricted-host.json) | 0 of 4 | Launcher unavailable |
+
+The macOS bundles are the original observations from [workflow run 44830101830](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/runs/44830101830), checker commit `d4da506df2356998c27b030080d34cb2903cd70c`. The workflow checked the expected exit code for every case. The stored observations can be rescored after the CI archives expire. These four-condition demonstrations do not estimate production error rates.
 
 To replay the identical driver observations through the original policy implementation, install `agent-boundary-check==0.2.0` in a separate environment and run its Python interpreter on:
 
@@ -34,7 +44,7 @@ To replay the identical driver observations through the original policy implemen
 python scripts/replay_legacy_policy.py verification/calibration-local.json examples/calibration/policy.toml
 ```
 
-This replays the original scoring logic. It does not represent a separate execution of the old driver on each vendor release.
+For an end-to-end legacy baseline, use that same isolated 0.2.0 interpreter to run `scripts/run_calibration.py --out legacy.json`. This executes the original driver and collector in fresh fixtures. The checked-in Linux legacy bundle was collected that way. The separate status replay isolates the scoring step.
 
 ## Installed agent study
 

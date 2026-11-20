@@ -6,8 +6,8 @@ from pathlib import Path
 
 from agent_boundary_check.diffing import diff_reports
 from agent_boundary_check.evidence_io import read_json
-from agent_boundary_check.models import CAPABILITIES, ProbeStatus
-from agent_boundary_check.policy import load_policy
+from agent_boundary_check.models import CAPABILITIES, ProbeResult, ProbeStatus
+from agent_boundary_check.policy import evaluate_policy, load_policy
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "calibration"
 
@@ -31,7 +31,9 @@ def score(bundle):
         raise ValueError("unsupported study protocol or repetitions")
     expected = {(r, case) for r in range(repeats) for case in design["cases"]}
     samples = {}
-    counts = {"observer": Counter(), "status_only": Counter()}
+    legacy = bundle.get("checker_version") == "0.2.0"
+    method = "released_0.2.0" if legacy else "observer"
+    counts = {method: Counter(), "status_only": Counter()}
     for sample in bundle["samples"]:
         key = (sample["repetition"], sample["case"])
         if type(key[0]) is not int or key not in expected or key in samples:
@@ -39,7 +41,14 @@ def score(bundle):
         report = sample["report"]
         if report["agent"] != bundle["runner"] or report["agent_version"] != bundle["version"]:
             raise ValueError("runner identity mismatch")
-        result = diff_reports(report, report, policy=policy)
+        if report["schema_version"] != (1 if legacy else 2):
+            raise ValueError("checker and report schema disagree")
+        result = diff_reports(report, report, policy=None if legacy else policy)
+        violations = result.after_policy_violations
+        if legacy:
+            recomputed = evaluate_policy([ProbeResult.from_dict(p) for p in report["probes"]], policy)
+            if recomputed != violations:
+                raise ValueError("legacy policy outcome differs from study contract")
         status = sample["runner_status"]
         if status not in {"completed", "runner_failed", "timed_out"}:
             raise ValueError("unknown runner outcome")
@@ -48,7 +57,7 @@ def score(bundle):
             raise ValueError("unknown observer control outcome")
         protected = control == "protected" if bundle["runner"] == "codex-sandbox" else control == "shared_principal"
         usable = status == "completed" and protected and not result.has_unusable_evidence
-        verdict = ("violation" if result.after_policy_violations else "pass") if usable else "inconclusive"
+        verdict = ("violation" if violations else "pass") if usable else "inconclusive"
         if sample["exit_code"] != {"pass": 0, "violation": 1, "inconclusive": 2}[verdict]:
             raise ValueError("stored exit code disagrees with evidence")
         driver = sample["driver_status"]

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 
+from agent_boundary_check import __version__
 from agent_boundary_check.cli import main
 from agent_boundary_check.diffing import load_report
 from agent_boundary_check.evidence_io import read_json
@@ -84,9 +85,11 @@ def run_case(case, root, runner, executable, version):
                 source.chmod(0o600)
         raw = parse_probe_payload(lab.results_path, "")
         path = root / "report.json"
+        args = ["collect", str(lab.root), "--policy", str(EXAMPLES / "policy.toml"), "--json", str(path)]
+        if __version__ != "0.2.0":
+            args.extend(["--tool-path", runner + "/python-driver"])
         with contextlib.redirect_stdout(io.StringIO()):
-            code = main(["collect", str(lab.root), "--tool-path", runner + "/python-driver",
-                         "--policy", str(EXAMPLES / "policy.toml"), "--json", str(path)])
+            code = main(args)
         report = load_report(path)
         # Give every captured run an identity, including a failed launcher.
         report.update(agent=runner, agent_version=version)
@@ -131,7 +134,7 @@ def run(out, runner, expected, repeats):
                 record = run_case(case, Path(directory), runner, executable, version)
                 samples.append({**record, "repetition": repetition})
     bundle = {"protocol": design["protocol"], "runner": runner, "version": version,
-              "repetitions": repeats, "samples": samples}
+              "checker_version": __version__, "repetitions": repeats, "samples": samples}
     with out.open("x", encoding="utf-8") as stream:
         json.dump(bundle, stream, indent=2, sort_keys=True)
         stream.write("\n")
