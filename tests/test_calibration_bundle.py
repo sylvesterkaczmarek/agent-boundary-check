@@ -39,3 +39,28 @@ def test_scoring_retains_missing_and_failed_runs():
         invalid["samples"].pop()
         with pytest.raises(ValueError, match="missing"):
             score(invalid)
+
+
+def test_copy_of_denied_trial_cannot_stand_in_for_a_repeat():
+    bundle = json.loads((ROOT / "verification/calibration-local.json").read_text())
+    cases = {s["case"]: s for s in bundle["samples"]}
+    cases["denied_repeat"]["report"] = copy.deepcopy(cases["denied"]["report"])
+    with pytest.raises(ValueError, match="distinct run"):
+        score(bundle)
+
+
+def test_unavailable_runs_keep_detection_denominator_and_leave_error_rates_undefined():
+    bundle = json.loads((ROOT / "verification/calibration-codex-restricted-host.json").read_text())
+    result = score(bundle)
+    for metrics in result["methods"].values():
+        assert metrics["change_detection"]["n"] == 1
+        assert metrics["unchanged_pair_coverage"]["rate"] == 0
+        for key in ("false_alarms", "false_pass_on_missing_control", "false_pass_on_nonpassing_cases"):
+            assert metrics[key] == {"count": 0, "n": 0, "rate": None, "wilson95": None}
+
+
+def test_different_checker_versions_cannot_be_pooled():
+    bundle = json.loads((ROOT / "verification/calibration-local.json").read_text())
+    bundle["samples"][-1]["report"]["checker_version"] = "other"
+    with pytest.raises(ValueError, match="checker version"):
+        score(bundle)

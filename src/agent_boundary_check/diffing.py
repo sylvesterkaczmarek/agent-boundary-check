@@ -158,11 +158,23 @@ def _violations(data: dict, policy: BoundaryPolicy | None) -> list[str]:
     return evaluate_policy([ProbeResult.from_dict(p) for p in data["probes"]], policy)
 
 
+def assess_report(data: dict, *, policy: BoundaryPolicy | None = None) -> tuple[list[str], list[str]]:
+    """Return evidence issues and policy violations for one recorded run."""
+    _validate_report(data, source="report")
+    issues = _evidence_issues(data)
+    if policy is not None:
+        if data["schema_version"] == 1 or data.get("policy") != policy_record(policy):
+            issues.append("report lacks the required policy provenance")
+        required = policy.allow | policy.deny
+        for probe in data["probes"]:
+            if probe["capability"] in required and probe["status"] == "skipped":
+                issues.append(f"{probe['capability']}: required measurement skipped")
+    return issues, _violations(data, policy)
+
+
 def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = None) -> ReportDiff:
-    _validate_report(before, source="before report")
-    _validate_report(after, source="after report")
-    before_issues = _evidence_issues(before)
-    after_issues = _evidence_issues(after)
+    before_issues, before_violations = assess_report(before, policy=policy)
+    after_issues, after_violations = assess_report(after, policy=policy)
     before_v2 = before["schema_version"] == 2
     after_v2 = after["schema_version"] == 2
     if before_v2 != after_v2:
@@ -171,21 +183,15 @@ def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = N
     if not before_v2 and not after_v2 and before.get("policy_violations") and not after.get("policy_violations"):
         after_issues.append("historical policy changed or violation resolved; legacy provenance unavailable")
     if before_v2 and after_v2:
+        if before["run_id"] == after["run_id"]:
+            comparable = False
+            after_issues.append("the reports describe the same run; collect a fresh candidate")
         if before["policy"] != after["policy"]:
             after_issues.append("applied policy changed or was omitted")
         for field in ("tool_path", "fixture_profile", "agent", "platform", "probe_platform"):
             if before.get(field) != after.get(field):
                 comparable = False
                 after_issues.append(f"{field} changed; confirm comparability in a matched run")
-    if policy is not None:
-        required = policy_record(policy)
-        for item, issues in ((before, before_issues), (after, after_issues)):
-            if item.get("policy") != required or item["schema_version"] == 1:
-                issues.append("report lacks the required policy provenance")
-            for probe in item["probes"]:
-                if probe["capability"] in policy.allow | policy.deny and probe["status"] == "skipped":
-                    issues.append(f"{probe['capability']}: required measurement skipped")
-
     before_map = {item["capability"]: item for item in before["probes"]}
     after_map = {item["capability"]: item for item in after["probes"]}
     changes = []
@@ -200,8 +206,6 @@ def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = N
                                         allowed and (old != "deny" or not comparable), old_reason, new_reason))
         if old in {"allow", "deny", "absent"} and new == "skipped":
             after_issues.append(f"{capability}: previously measured capability is now skipped")
-    before_violations = _violations(before, policy)
-    after_violations = _violations(after, policy)
     return ReportDiff(
         before_agent=before["agent"],
         after_agent=after["agent"],

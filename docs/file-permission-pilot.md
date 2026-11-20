@@ -20,7 +20,7 @@ From the repository root, after installing the checkout:
 ```sh
 python scripts/run_calibration.py --out local.json
 python scripts/score_calibration.py local.json
-python scripts/score_calibration.py verification/calibration-local.json
+python scripts/score_calibration.py verification/calibration-local.json --summary
 python scripts/run_calibration.py --runner codex-sandbox --expect-version "codex-cli 0.171.0" --out codex.json
 ```
 
@@ -62,7 +62,7 @@ Use a fresh output path for the second pinned version. Record the model, effecti
 
 ## Decision rule for a held-out study
 
-Use disjoint calibration and held-out configurations. Predeclare changed permissions, unchanged pairs and failed measurement controls. Primary targets are at least 90% detection on deliberately changed pairs, at most 5% false change alarms on unchanged pairs, and zero observed passes on missing controls. Count abstentions in the denominator for detection and report conclusive coverage and false passes alongside every rate. Report results at matched coverage by runner, with counts and uncertainty intervals. Wilson intervals in the scorer are descriptive for the small pilot. For repeated configurations use independent deployments as the statistical units and account for clustering. Size the held-out study for the intended precision before collection.
+Use disjoint calibration and held-out configurations. Predeclare changed permissions, unchanged pairs and failed measurement controls. Primary targets are at least 90% detection on deliberately changed pairs, at most 5% false change alarms on unchanged pairs, and zero observed passes on missing controls. Count abstentions in the denominator for detection and report conclusive coverage and false passes alongside every rate. Report results at matched coverage by runner, with counts and uncertainty intervals. Each trial needs its own run identifier. The scorer reports how many intact cases received a verdict and how many unchanged pairs had two conclusive verdicts. The false-alarm rate uses those comparable unchanged pairs. False passes on missing fixtures use trials in which the runner reached the measurement and the method's prerequisites were available. A zero denominator produces a null rate and interval. The detection metric keeps all scheduled changed pairs in its denominator. Wilson intervals in the scorer are descriptive for the small pilot. For repeated configurations use independent deployments as the statistical units and account for clustering. Size the held-out study for the intended precision before collection.
 
 A replication should use a separate operator and host, a pinned checker revision, environment and agent versions, the public design and fresh fixture data. Publish all outcome classes, including unusable ones. Archive the final protocol, corpus and redacted evidence together once a replication is available.
 

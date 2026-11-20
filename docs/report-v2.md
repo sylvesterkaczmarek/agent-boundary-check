@@ -6,7 +6,7 @@ Install the development checkout with `python -m pip install .`. Supply the same
 agent-boundary diff baseline.json candidate.json --policy team-policy.toml
 ```
 
-Exit 0 means the candidate satisfies the specified rules and the comparison found no newly granted risky capability. Exit 1 means a policy violation or newly granted risky capability. Exit 2 means the evidence cannot establish the comparison. Both reports are rescored. A previously failed baseline can be followed by a passing candidate once its permissions are corrected.
+Exit 0 means the candidate satisfies the specified rules and the comparison found no newly granted risky capability. Exit 1 means a policy violation or newly granted risky capability. Exit 2 means the evidence cannot establish the comparison. Both reports are rescored. A release comparison requires two distinct v2 run identifiers. Supplying the same run in both positions returns exit 2. A previously failed baseline can be followed by a passing candidate once its permissions are corrected.
 
 The report includes the normalised policy and its SHA-256 digest. Reordering rules or changing TOML formatting preserves identity. An omitted policy is recorded as null. Different applied policies, execution routes, agent identities, fixture profiles or host/probe platform strings require a matched run for a release verdict. Agent versions may differ. The checker version is recorded for study provenance. Custom commands carry a fingerprint of their argument template. For a GUI collector, supply a stable execution label using `collect --tool-path`. Its default manual label identifies only the Python-driver route.
 

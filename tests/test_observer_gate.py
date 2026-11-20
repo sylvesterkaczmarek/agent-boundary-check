@@ -115,3 +115,13 @@ def test_refuses_report_output_over_host_evidence(tmp_path):
     assert main(["prepare", "--output", str(root), "--no-network", "--no-sockets"]) == 0
     for name in ("fixture-baseline.json", "fixture-receipt.json"):
         assert main(["collect", str(root), "--json", str(root/name)]) == 2
+
+
+def test_copied_candidate_report_cannot_pass_a_release_gate(tmp_path, reference):
+    for name in ("baseline", "candidate"):
+        (tmp_path / name).write_text(json.dumps(reference["denied"]))
+    rules = Path(__file__).resolve().parents[1] / "examples/calibration/policy.toml"
+    args = ["diff", str(tmp_path / "baseline"), str(tmp_path / "candidate"), "--policy", str(rules)]
+    assert main(args) == 2
+    (tmp_path / "candidate").write_text(json.dumps(reference["denied_repeat"]))
+    assert main(args) == 0
