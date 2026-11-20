@@ -129,6 +129,10 @@ class AgentAdapter:
     def build_command(self, prompt: str, prompt_file: Path) -> Sequence[str]:
         raise NotImplementedError
 
+    @property
+    def tool_path(self) -> str:
+        return f"{self.name}/python-driver"
+
     def version_command(self) -> Sequence[str]:
         return [self.executable, "--version"]
 

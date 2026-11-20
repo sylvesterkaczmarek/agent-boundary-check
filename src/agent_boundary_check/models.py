@@ -54,12 +54,13 @@ class ProbeResult:
     capability: str
     status: ProbeStatus
     detail: str = ""
+    reason: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProbeResult":
         if not isinstance(data, dict):
             raise ValueError("probe entry must be an object")
-        if set(data) - {"capability", "status", "detail"}:
+        if set(data) - {"capability", "status", "detail", "reason"}:
             raise ValueError("probe entry contains unexpected fields")
         capability = data.get("capability")
         if not isinstance(capability, str) or capability not in CAPABILITIES:
@@ -73,7 +74,13 @@ class ProbeResult:
         detail = data.get("detail", "")
         if not isinstance(detail, str):
             raise ValueError(f"probe detail for {capability} must be a string")
-        return cls(capability=capability, status=status, detail=detail[:1000])
+        reason = data.get("reason")
+        if reason is not None and (
+            status != ProbeStatus.SKIPPED or not isinstance(reason, str)
+            or reason not in {"disabled", "manual_environment", "unsupported", "baseline_unavailable"}
+        ):
+            raise ValueError(f"invalid skip reason for {capability}")
+        return cls(capability=capability, status=status, detail=detail[:1000], reason=reason)
 
 
 @dataclass
@@ -94,11 +101,16 @@ class RunReport:
     runner_exit_code: int | None = None
     runner_timed_out: bool = False
     runner_output: str = ""
+    checker_version: str = ""
+    fixture_profile: str = "shared-files-v1"
+    tool_path: str = ""
+    policy: dict | None = None
+    host_observations: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["probes"] = [
-            {"capability": p.capability, "status": p.status.value, "detail": p.detail}
+            {**asdict(p), "status": p.status.value}
             for p in self.probes
         ]
         return data

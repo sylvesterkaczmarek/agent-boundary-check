@@ -52,7 +52,7 @@ def _leaf_open(path, directory, flags):
     return os.open(path, flags, 0o600)
 
 
-def read_regular_bytes(path, *, limit, strict_parents=True, prefix_only=False):
+def _read_regular_file(path, *, limit, strict_parents=True, prefix_only=False):
     """Never read a symlink, device, socket, FIFO or multiply linked file."""
     flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_CLOEXEC', 0)
     with _parent_descriptor(path, strict_parents=strict_parents) as (name, directory):
@@ -66,7 +66,18 @@ def read_regular_bytes(path, *, limit, strict_parents=True, prefix_only=False):
             data = handle.read(limit + 1)
     if not prefix_only and len(data) > limit:
         raise ValueError('input exceeds the byte limit')
+    return data, (info.st_dev, info.st_ino)
+
+
+def read_regular_bytes(path, *, limit, strict_parents=True, prefix_only=False):
+    data, _ = _read_regular_file(path, limit=limit, strict_parents=strict_parents, prefix_only=prefix_only)
     return data
+
+
+def directory_identity(target):
+    with _parent_descriptor(target) as (name, descriptor):
+        info = os.fstat(descriptor) if descriptor is not None else name.parent.lstat()
+        return [info.st_dev, info.st_ino]
 
 
 def write_new_text(path, text):

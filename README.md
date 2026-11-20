@@ -11,6 +11,18 @@
 
 Agent Boundary Check is a focused command-line security tool (CLI) for measuring the effective execution boundary of AI coding agents with synthetic canaries. It asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The `agent-boundary` command is the supported public interface; the Python package currently contains implementation internals rather than a separately supported library API. The CLI has zero runtime dependencies beyond Python 3.11+.
 
+## Development version
+
+Reports from the development branch record the applied policy, checker version, execution route, host fixture checks and reasons for skipped probes. A missing or replaced read fixture gives an inconclusive result. A successful shared write can be checked against its marker from the host.
+
+Compare releases using the policy applied at collection:
+
+```bash
+agent-boundary diff before.json after.json --policy team-policy.toml
+```
+
+[Run the reproducible file-permission pilot](docs/file-permission-pilot.md) or [read the report format and migration notes](docs/report-v2.md). Install this checkout to use these commands. The PyPI installation below describes the published version.
+
 ## Version 0.2.0
 
 Version **0.2.0** includes separately tested reliability corrections. It adds
@@ -167,7 +179,7 @@ Compare reports after an agent upgrade or configuration change:
 agent-boundary diff boundary-before.json boundary-after.json
 ```
 
-A newly allowed high-risk capability is marked `NEW EXPOSURE` and returns exit code `1`, as does a policy violation in the newer report. Invalid or incomplete evidence in either report, a failed runner, or a previously measured check becoming skipped returns `2`. Unchanged intentional skips remain visible. See [comparison guidance](docs/reproducibility.md).
+A measured denial followed by a high-risk allowance is marked `NEW EXPOSURE` and returns exit code `1`, as does a policy violation in the newer report. Invalid or incomplete evidence in either report, a failed runner, or a previously measured check becoming skipped returns `2`. Unchanged intentional skips remain visible. See [comparison guidance](docs/reproducibility.md).
 
 Skip the external network probe:
 
@@ -247,7 +259,7 @@ See [`docs/threat-model.md`](docs/threat-model.md).
 
 ## What the result means
 
-An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means explicit permission rejection or an inaccessible/missing synthetic path after any required host baseline succeeded. A missing path can be hidden by a sandbox or removed by another process; the observation alone does not establish the cause. Connection timeouts, DNS failures, refused connections and unexpected resource errors are inconclusive and reported as `ERROR`. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` remain distinct.
+An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means explicit permission rejection or an inaccessible/missing synthetic path after any required host baseline succeeded. The host checks the original file identity and contents. A missing host fixture or changed parent invalidates the affected measurement. Connection timeouts, DNS failures, refused connections and unexpected resource errors are inconclusive and reported as `ERROR`. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` remain distinct.
 
 `LOW` requires complete evidence with risky capabilities denied, or optional Unix sockets absent. Mandatory synthetic checks cannot claim `N/A`. `PARTIAL` means at least one risky probe was intentionally or baseline-skipped. Missing or invalid evidence produces `UNKNOWN` when no exposure was observed; a known exposure keeps its higher risk rating alongside an incomplete-evidence warning and exit code `2`.
 

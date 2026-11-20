@@ -240,7 +240,13 @@ def test_synthetic_socket_connection_sends_no_protocol_data(tmp_path):
     # Short path avoids the operating system's small Unix socket path limit.
     with tempfile.TemporaryDirectory(prefix='abc-review-socket-') as short:
         path = str(Path(short)/'owned.sock')
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        try:
+            server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except PermissionError:
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                raise
+            pytest.skip("host forbids creation of the Unix socket test fixture")
+        with server_socket as server:
             server.bind(path); server.listen(1); server.settimeout(3)
             value = json.loads(lab.manifest_path.read_text())
             value.update(socket_probe=True, unix_socket_probe_supported=True,

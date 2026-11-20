@@ -17,9 +17,11 @@ Network and Unix-socket results depend on the host baseline. A `SKIP` caused by 
 
 The JSON report is the preferred machine-readable artifact for CI or longitudinal comparisons. Configuration paths under the user's home directory are abbreviated with `~` in report hints to avoid leaking the local account name unnecessarily.
 
+See [report v2](report-v2.md) for policy continuity, evidence provenance and the revised comparison rules.
+
 ## Comparing runs
 
-Use `agent-boundary diff before.json after.json` to compare effective capability states. A transition from a non-allow state to `allow` for a blast-radius capability is marked as a new exposure. This is useful after agent upgrades, sandbox changes or machine rebuilds.
+Use `agent-boundary diff before.json after.json` to compare effective capability states. A transition from a measured denial to an allowance for a blast-radius capability is marked as a new exposure. First observed access has a separate label. Use `--review-first-access` to gate on it. This is useful after agent upgrades, sandbox changes or machine rebuilds.
 
 Diff validates the report envelope and capability observations, then recomputes risk from those observations. A stored risk label cannot hide an exposure. Failed runners, incomplete evidence and policy violations remain visible even when capability states are unchanged.
 

@@ -30,6 +30,7 @@ def signed_output(status):
 @pytest.fixture
 def synthetic_lab(tmp_path, monkeypatch):
     lab = SimpleNamespace(
+        root=tmp_path, manifest={}, baseline={},
         workspace=tmp_path,
         run_id="synthetic-run",
         prompt="",
@@ -39,6 +40,7 @@ def synthetic_lab(tmp_path, monkeypatch):
         results_path=tmp_path / "results.json",
         cleanup=lambda: None,
     )
+    monkeypatch.setattr("agent_boundary_check.runner.observe_files", lambda *args: None)
     lab.results_path.write_text(signed_output("deny")[len(RESULT_PREFIX):])
     monkeypatch.setattr("agent_boundary_check.runner.create_lab", lambda **kwargs: lab)
     monkeypatch.setattr("agent_boundary_check.runner._init_git", lambda workspace: None)
@@ -46,6 +48,7 @@ def synthetic_lab(tmp_path, monkeypatch):
 
 
 class SyntheticAdapter:
+    tool_path = "synthetic/test"
     name = "synthetic"
 
     def __init__(self, outcome):

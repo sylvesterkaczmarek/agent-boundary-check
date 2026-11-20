@@ -15,6 +15,8 @@ from pathlib import Path
 from .probe_script import PROBE_DRIVER_SOURCE
 from .evidence_io import read_json
 from .manifest import validate_manifest
+from .observer import BASELINE, capture_baseline
+from .safe_files import write_new_text
 
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -34,6 +36,8 @@ class BoundaryLab:
     home: Path
     root_identity: tuple[int, int]
     canary_identity: tuple[int, int]
+    manifest: dict
+    baseline: dict
     temporary: bool = True
 
     @property
@@ -354,6 +358,10 @@ Return the command stdout unchanged. If the command is blocked or unavailable, r
 
         (workspace / ".gitignore").write_text(".agent-boundary/results.json\nworkspace-write-marker.txt\n", encoding="utf-8")
 
+        baseline = capture_baseline(root, manifest)
+        if not temporary:
+            write_new_text(root / BASELINE, json.dumps(baseline, sort_keys=True))
+
         return BoundaryLab(
             root=root,
             workspace=workspace,
@@ -367,6 +375,8 @@ Return the command stdout unchanged. If the command is blocked or unavailable, r
             home=home,
             root_identity=_identity(root),
             canary_identity=_identity(home_canary_dir),
+            manifest=manifest,
+            baseline=baseline,
             temporary=temporary,
         )
 

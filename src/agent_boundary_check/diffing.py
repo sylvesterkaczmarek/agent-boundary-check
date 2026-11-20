@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import SKIPPABLE_CAPABILITIES, CAPABILITIES, RISKY_CAPABILITIES, ProbeResult
-from .report import risk_summary
+from .report import fixture_issue, risk_summary
+from .observer import validate_observations
+from .policy import BoundaryPolicy, evaluate_policy, parse_policy, policy_record
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,9 @@ class CapabilityChange:
     before: str
     after: str
     new_exposure: bool
+    first_observation: bool = False
+    before_reason: str | None = None
+    after_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,9 +56,23 @@ def _validate_report(data: dict, *, source: str) -> None:
     if (
         not isinstance(data, dict)
         or type(data.get("schema_version")) is not int
-        or data.get("schema_version") != 1
+        or data.get("schema_version") not in (1, 2)
     ):
         raise ValueError(f"unsupported report schema: {source}")
+    if data["schema_version"] == 2:
+        for key in ("tool_path", "checker_version", "fixture_profile"):
+            if not isinstance(data.get(key), str) or not data[key].strip():
+                raise ValueError(f"missing {key}: {source}")
+        validate_observations(data.get("host_observations"))
+        if "policy" not in data:
+            raise ValueError(f"missing policy provenance: {source}")
+        if data["policy"] is not None:
+            record = data["policy"]
+            if not isinstance(record, dict):
+                raise ValueError(f"invalid policy provenance: {source}")
+            rules = parse_policy({k: v for k, v in record.items() if k != "sha256"})
+            if policy_record(rules) != record:
+                raise ValueError(f"policy digest or normalisation mismatch: {source}")
     probes = data.get("probes")
     if not isinstance(probes, list):
         raise ValueError(f"report has no probes: {source}")
@@ -64,6 +83,8 @@ def _validate_report(data: dict, *, source: str) -> None:
             probe = ProbeResult.from_dict(item)
         except ValueError as exc:
             raise ValueError(f"report contains an invalid probe entry: {exc}: {source}") from exc
+        if data["schema_version"] == 2 and probe.status.value == "skipped" and not probe.reason:
+            raise ValueError(f"skip reason missing: {source}")
         capability = probe.capability
         if capability in seen:
             raise ValueError(f"report contains duplicate capability {capability}: {source}")
@@ -97,6 +118,13 @@ def _evidence_issues(data: dict) -> list[str]:
     elif data.get("runner_exit_code") not in (None, 0):
         issues.append(f"agent runner exited with status {data['runner_exit_code']}")
     for item in data["probes"]:
+        if data["schema_version"] == 2:
+            probe = ProbeResult.from_dict(item)
+            issue = fixture_issue(probe, data["host_observations"])
+            if issue:
+                issues.append(f"{probe.capability}: {issue}")
+            if probe.reason == "baseline_unavailable":
+                issues.append(f"{probe.capability}: host prerequisite unavailable")
         if item["status"] in {"unknown", "error"} or (
             item["status"] == "skipped" and item["capability"] not in SKIPPABLE_CAPABILITIES
         ):
@@ -117,38 +145,69 @@ def _risk_from_evidence(data: dict, issues: list[str]) -> str:
     return level
 
 
-def diff_reports(before: dict, after: dict) -> ReportDiff:
+def _violations(data: dict, policy: BoundaryPolicy | None) -> list[str]:
+    if policy is None:
+        if data["schema_version"] == 1:
+            return list(data.get("policy_violations", []))
+        record = data["policy"]
+        if record is None:
+            return []
+        policy = parse_policy({k: v for k, v in record.items() if k != "sha256"})
+    return evaluate_policy([ProbeResult.from_dict(p) for p in data["probes"]], policy)
+
+
+def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = None) -> ReportDiff:
     _validate_report(before, source="before report")
     _validate_report(after, source="after report")
-    before_map = {str(item["capability"]): str(item["status"]) for item in before["probes"]}
-    after_map = {str(item["capability"]): str(item["status"]) for item in after["probes"]}
-    changes: list[CapabilityChange] = []
-    for capability in CAPABILITIES:
-        old = before_map.get(capability, "missing")
-        new = after_map.get(capability, "missing")
-        if old == new:
-            continue
-        new_exposure = capability in RISKY_CAPABILITIES and new == "allow" and old != "allow"
-        changes.append(CapabilityChange(capability, old, new, new_exposure))
     before_issues = _evidence_issues(before)
     after_issues = _evidence_issues(after)
-    after_issues.extend(
-        f"{change.capability}: previously measured capability is now skipped"
-        for change in changes
-        if change.before in {"allow", "deny", "absent"} and change.after == "skipped"
-    )
+    before_v2 = before["schema_version"] == 2
+    after_v2 = after["schema_version"] == 2
+    if before_v2 != after_v2:
+        after_issues.append("legacy report lacks policy, tool and fixture provenance")
+    if before_v2 and after_v2:
+        if before["policy"] != after["policy"]:
+            after_issues.append("applied policy changed or was omitted")
+        for field in ("tool_path", "fixture_profile", "agent", "platform", "probe_platform"):
+            if before.get(field) != after.get(field):
+                after_issues.append(f"{field} changed; confirm comparability in a matched run")
+    if policy is not None:
+        required = policy_record(policy)
+        for item, issues in ((before, before_issues), (after, after_issues)):
+            if item.get("policy") != required or item["schema_version"] == 1:
+                issues.append("report lacks the required policy provenance")
+            for probe in item["probes"]:
+                if probe["capability"] in policy.allow | policy.deny and probe["status"] == "skipped":
+                    issues.append(f"{probe['capability']}: required measurement skipped")
+
+    before_map = {item["capability"]: item for item in before["probes"]}
+    after_map = {item["capability"]: item for item in after["probes"]}
+    changes = []
+    for capability in CAPABILITIES:
+        left, right = before_map[capability], after_map[capability]
+        old, new = left["status"], right["status"]
+        old_reason, new_reason = left.get("reason"), right.get("reason")
+        if old == new and old_reason == new_reason:
+            continue
+        allowed = capability in RISKY_CAPABILITIES and new == "allow"
+        changes.append(CapabilityChange(capability, old, new, allowed and old == "deny",
+                                        allowed and old != "deny", old_reason, new_reason))
+        if old in {"allow", "deny", "absent"} and new == "skipped":
+            after_issues.append(f"{capability}: previously measured capability is now skipped")
+    before_violations = _violations(before, policy)
+    after_violations = _violations(after, policy)
     return ReportDiff(
-        before_agent=str(before.get("agent", "unknown")),
-        after_agent=str(after.get("agent", "unknown")),
+        before_agent=before["agent"],
+        after_agent=after["agent"],
         before_version=before.get("agent_version"),
         after_version=after.get("agent_version"),
-        before_risk=_risk_from_evidence(before, before_issues),
-        after_risk=_risk_from_evidence(after, after_issues),
+        before_risk=_risk_from_evidence({**before, "policy_violations": before_violations}, before_issues),
+        after_risk=_risk_from_evidence({**after, "policy_violations": after_violations}, after_issues),
         changes=changes,
         before_evidence_issues=before_issues,
         after_evidence_issues=after_issues,
-        before_policy_violations=list(before.get("policy_violations", [])),
-        after_policy_violations=list(after.get("policy_violations", [])),
+        before_policy_violations=before_violations,
+        after_policy_violations=after_violations,
         before_skipped=[p["capability"] for p in before["probes"] if p["status"] == "skipped"],
         after_skipped=[p["capability"] for p in after["probes"] if p["status"] == "skipped"],
     )
