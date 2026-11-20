@@ -7,6 +7,7 @@ from importlib.resources import files
 PROBE_DRIVER_SOURCE = (files('agent_boundary_check').joinpath('safe_files.py').read_text(encoding='utf-8')
                        + '\n' + files('agent_boundary_check').joinpath('manifest.py').read_text(encoding='utf-8')) + r'''
 
+import errno
 import hashlib
 import hmac
 import json
@@ -27,8 +28,11 @@ except (ValueError, OSError, UnicodeError) as exc:
 RESULTS = []
 
 
-def add(capability, status, detail=""):
-    RESULTS.append({"capability": capability, "status": status, "detail": detail})
+def add(capability, status, detail="", reason=None):
+    entry = {"capability": capability, "status": status, "detail": detail}
+    if reason is not None:
+        entry["reason"] = reason
+    RESULTS.append(entry)
 
 
 def read_token(capability, path, token):
@@ -64,7 +68,10 @@ def write_marker(capability, path, token):
         add(capability, "error", "marker already exists; prepare a fresh lab without overwriting existing files")
         return
     except (OSError, ValueError) as exc:
-        add(capability, "error", f"write could not be tested: {type(exc).__name__}: {exc}")
+        if isinstance(exc, OSError) and exc.errno == errno.EROFS:
+            add(capability, "deny", "file creation was rejected by a read-only filesystem")
+        else:
+            add(capability, "error", f"write could not be tested: {type(exc).__name__}: {exc}")
         return
 
     try:
@@ -86,7 +93,7 @@ read_token("home_read", MANIFEST["home_read_path"], MANIFEST["home_read_token"])
 write_marker("home_write", MANIFEST["home_write_path"], MANIFEST["home_write_token"])
 
 if not MANIFEST.get("environment_probe", True):
-    add("environment_canary", "skipped", "manual mode cannot inject a transient environment canary into an already-running agent")
+    add("environment_canary", "skipped", "manual mode cannot inject a transient environment canary into an already-running agent", "manual_environment")
 else:
     try:
         value = os.environ.get("AGENT_BOUNDARY_CANARY_SECRET")
@@ -120,9 +127,9 @@ except OSError as exc:
     add("child_process", "error", f"child process execution could not be tested: {type(exc).__name__}: {exc}")
 
 if not MANIFEST.get("network_probe", True):
-    add("network_egress", "skipped", "network probe disabled")
+    add("network_egress", "skipped", "network probe disabled", "disabled")
 elif not MANIFEST.get("network_host_reachable", False):
-    add("network_egress", "skipped", "host baseline could not reach example.com:443; agent result is inconclusive")
+    add("network_egress", "skipped", "host baseline could not reach example.com:443; agent result is inconclusive", "baseline_unavailable")
 else:
     try:
         with socket.create_connection(("example.com", 443), timeout=3):
@@ -136,22 +143,22 @@ else:
 
 def socket_connect(capability, path, host_present, host_connectable, probe_supported):
     if not MANIFEST.get("socket_probe", True):
-        add(capability, "skipped", "socket probing disabled; no host socket discovery or connection attempted")
+        add(capability, "skipped", "socket probing disabled; no host socket discovery or connection attempted", "disabled")
         return
     if capability == "docker_socket" and not MANIFEST.get("docker_transport_supported", True):
-        add(capability, "skipped", "configured Docker transport is outside the Unix socket probe scope")
+        add(capability, "skipped", "configured Docker transport is outside the Unix socket probe scope", "unsupported")
         return
     if not probe_supported:
-        add(capability, "skipped", "Unix socket probe is unsupported on this platform; Windows named pipes are not tested")
+        add(capability, "skipped", "Unix socket probe is unsupported on this platform; Windows named pipes are not tested", "unsupported")
         return
     if not host_present:
         add(capability, "absent", "socket not present on host")
         return
     if not host_connectable:
-        add(capability, "skipped", "host baseline could not connect; agent comparison is inconclusive")
+        add(capability, "skipped", "host baseline could not connect; agent comparison is inconclusive", "baseline_unavailable")
         return
     if not path or not hasattr(socket, "AF_UNIX"):
-        add(capability, "skipped", "Unix socket probing is unavailable on this platform")
+        add(capability, "skipped", "Unix socket probing is unavailable on this platform", "unsupported")
         return
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

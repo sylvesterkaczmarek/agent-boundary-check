@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Recheck fixture identity and shared marker contents from the host at collection.
+- Record the applied policy and execution route. Distinguish first observations, permission changes and missing prerequisites in report comparisons.
+- Add an offline calibration dataset, pinned CLI study runners and an optional Inspect replay task.
+
 ## 0.2.0
 
 Reliability release, 5 November 2026.

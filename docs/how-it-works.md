@@ -57,7 +57,7 @@ The agent-side probe is marked `SKIP` when the corresponding host baseline fails
 
 The distinction matters. Missing evidence is never reported as a successful security boundary.
 
-A missing synthetic path records observed invisibility as `deny`, but cannot distinguish sandbox hiding from concurrent deletion. Network and socket baselines can become stale between the host and agent checks, which is why later connection failures are inconclusive.
+The driver records local invisibility. The host checks the prepared fixture before collection can accept that observation as a denial. A disappeared or changed host fixture makes the affected measurement inconclusive. Network and socket baselines can become stale between the host and agent checks, which is why later connection failures are inconclusive.
 
 ## File lifecycle
 

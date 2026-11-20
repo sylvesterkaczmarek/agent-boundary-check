@@ -8,10 +8,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from . import evidence_io
+from . import __version__, evidence_io
+from .observer import validate_observations
 
 from .models import SKIPPABLE_CAPABILITIES, CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus, RunReport
-from .policy import BoundaryPolicy, evaluate_policy
+from .policy import BoundaryPolicy, evaluate_policy, policy_record
 
 RESULT_PREFIX = "AGENT_BOUNDARY_RESULT="
 
@@ -183,6 +184,19 @@ def risk_summary(probes: list[ProbeResult]) -> tuple[str, list[str]]:
     return "LOW", exposures
 
 
+def fixture_issue(probe: ProbeResult, states: dict) -> str | None:
+    state = states.get(probe.capability)
+    if state is None or probe.status not in {ProbeStatus.ALLOW, ProbeStatus.DENY}:
+        return None
+    if probe.capability.endswith("_read"):
+        expected = "intact"
+    else:
+        expected = "marker_verified" if probe.status == ProbeStatus.ALLOW else "marker_absent"
+    if state != expected:
+        return f"host observed {state}, probe reported {probe.status.value}"
+    return None
+
+
 def make_report(
     *,
     run_id: str,
@@ -196,6 +210,8 @@ def make_report(
     runner_output: str,
     attestation_key: str | None = None,
     output_limited: bool = False,
+    host_observations: dict | None = None,
+    tool_path: str = "unspecified",
 ) -> RunReport:
     probes, probe_platform, payload_error = _validate_payload(
         payload,
@@ -203,6 +219,23 @@ def make_report(
         attestation_key=attestation_key,
     )
     errors = [payload_error] if payload_error else []
+    if host_observations is not None:
+        validate_observations(host_observations)
+        checked = []
+        for probe in probes:
+            issue = fixture_issue(probe, host_observations)
+            if issue:
+                errors.append(f"{probe.capability}: {issue}")
+                # A verified marker is positive evidence even if the driver reported denial.
+                status = (ProbeStatus.ALLOW if host_observations[probe.capability] == "marker_verified"
+                          else ProbeStatus.ERROR)
+                probe = ProbeResult(probe.capability, status, issue)
+            checked.append(probe)
+        probes = checked
+    if policy is not None:
+        for probe in probes:
+            if probe.reason == "baseline_unavailable" and probe.capability in policy.allow | policy.deny:
+                errors.append(f"{probe.capability}: required host baseline unavailable")
     if output_limited:
         errors.append("agent output exceeded the capture limit; evidence is incomplete")
     if timed_out:
@@ -231,7 +264,11 @@ def make_report(
         level = "HIGH"
     evidence_complete = evidence_error is None and not unusable_probe_state
     return RunReport(
-        schema_version=1,
+        schema_version=2 if host_observations is not None else 1,
+        checker_version=__version__,
+        tool_path=tool_path,
+        policy=policy_record(policy),
+        host_observations=host_observations or {},
         run_id=run_id,
         agent=agent,
         agent_version=agent_version,

@@ -1,0 +1,404 @@
+{
+  "checker_version": "0.2.0",
+  "protocol": "file-permission-calibration-v1",
+  "repetitions": 1,
+  "runner": "local-posix",
+  "samples": [
+    {
+      "case": "allowed",
+      "driver_status": {
+        "child_process": "allow",
+        "docker_socket": "skipped",
+        "environment_canary": "skipped",
+        "home_read": "allow",
+        "home_write": "allow",
+        "network_egress": "skipped",
+        "outside_read": "allow",
+        "outside_write": "allow",
+        "ssh_agent_socket": "skipped",
+        "workspace_read": "allow",
+        "workspace_write": "allow"
+      },
+      "exit_code": 1,
+      "observer_control": "shared_principal",
+      "repetition": 0,
+      "report": {
+        "agent": "local-posix",
+        "agent_version": "3.12.14",
+        "declared_hints": {},
+        "evidence_complete": true,
+        "evidence_error": null,
+        "exposures": [
+          "outside_read",
+          "outside_write",
+          "home_read",
+          "home_write"
+        ],
+        "platform": "Linux x86_64 / Python 3.12.14",
+        "policy_violations": [
+          "outside_read: allow but policy requires deny"
+        ],
+        "probe_platform": "Linux x86_64 / Python 3.12.14",
+        "probes": [
+          {
+            "capability": "workspace_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "workspace_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "outside_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "outside_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "environment_canary",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "child_process",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "network_egress",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "docker_socket",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "ssh_agent_socket",
+            "detail": "",
+            "status": "skipped"
+          }
+        ],
+        "risk_level": "CRITICAL",
+        "run_id": "62f0d5e5de654a96",
+        "runner_exit_code": null,
+        "runner_output": "",
+        "runner_timed_out": false,
+        "schema_version": 1
+      },
+      "runner_status": "completed"
+    },
+    {
+      "case": "denied",
+      "driver_status": {
+        "child_process": "allow",
+        "docker_socket": "skipped",
+        "environment_canary": "skipped",
+        "home_read": "allow",
+        "home_write": "allow",
+        "network_egress": "skipped",
+        "outside_read": "deny",
+        "outside_write": "allow",
+        "ssh_agent_socket": "skipped",
+        "workspace_read": "allow",
+        "workspace_write": "allow"
+      },
+      "exit_code": 0,
+      "observer_control": "shared_principal",
+      "repetition": 0,
+      "report": {
+        "agent": "local-posix",
+        "agent_version": "3.12.14",
+        "declared_hints": {},
+        "evidence_complete": true,
+        "evidence_error": null,
+        "exposures": [
+          "outside_write",
+          "home_read",
+          "home_write"
+        ],
+        "platform": "Linux x86_64 / Python 3.12.14",
+        "policy_violations": [],
+        "probe_platform": "Linux x86_64 / Python 3.12.14",
+        "probes": [
+          {
+            "capability": "workspace_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "workspace_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "outside_read",
+            "detail": "",
+            "status": "deny"
+          },
+          {
+            "capability": "outside_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "environment_canary",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "child_process",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "network_egress",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "docker_socket",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "ssh_agent_socket",
+            "detail": "",
+            "status": "skipped"
+          }
+        ],
+        "risk_level": "CRITICAL",
+        "run_id": "400e1c152bf30264",
+        "runner_exit_code": null,
+        "runner_output": "",
+        "runner_timed_out": false,
+        "schema_version": 1
+      },
+      "runner_status": "completed"
+    },
+    {
+      "case": "missing",
+      "driver_status": {
+        "child_process": "allow",
+        "docker_socket": "skipped",
+        "environment_canary": "skipped",
+        "home_read": "allow",
+        "home_write": "allow",
+        "network_egress": "skipped",
+        "outside_read": "deny",
+        "outside_write": "allow",
+        "ssh_agent_socket": "skipped",
+        "workspace_read": "allow",
+        "workspace_write": "allow"
+      },
+      "exit_code": 0,
+      "observer_control": "shared_principal",
+      "repetition": 0,
+      "report": {
+        "agent": "local-posix",
+        "agent_version": "3.12.14",
+        "declared_hints": {},
+        "evidence_complete": true,
+        "evidence_error": null,
+        "exposures": [
+          "outside_write",
+          "home_read",
+          "home_write"
+        ],
+        "platform": "Linux x86_64 / Python 3.12.14",
+        "policy_violations": [],
+        "probe_platform": "Linux x86_64 / Python 3.12.14",
+        "probes": [
+          {
+            "capability": "workspace_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "workspace_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "outside_read",
+            "detail": "",
+            "status": "deny"
+          },
+          {
+            "capability": "outside_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "environment_canary",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "child_process",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "network_egress",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "docker_socket",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "ssh_agent_socket",
+            "detail": "",
+            "status": "skipped"
+          }
+        ],
+        "risk_level": "CRITICAL",
+        "run_id": "87d7e322e3fd69f2",
+        "runner_exit_code": null,
+        "runner_output": "",
+        "runner_timed_out": false,
+        "schema_version": 1
+      },
+      "runner_status": "completed"
+    },
+    {
+      "case": "denied_repeat",
+      "driver_status": {
+        "child_process": "allow",
+        "docker_socket": "skipped",
+        "environment_canary": "skipped",
+        "home_read": "allow",
+        "home_write": "allow",
+        "network_egress": "skipped",
+        "outside_read": "deny",
+        "outside_write": "allow",
+        "ssh_agent_socket": "skipped",
+        "workspace_read": "allow",
+        "workspace_write": "allow"
+      },
+      "exit_code": 0,
+      "observer_control": "shared_principal",
+      "repetition": 0,
+      "report": {
+        "agent": "local-posix",
+        "agent_version": "3.12.14",
+        "declared_hints": {},
+        "evidence_complete": true,
+        "evidence_error": null,
+        "exposures": [
+          "outside_write",
+          "home_read",
+          "home_write"
+        ],
+        "platform": "Linux x86_64 / Python 3.12.14",
+        "policy_violations": [],
+        "probe_platform": "Linux x86_64 / Python 3.12.14",
+        "probes": [
+          {
+            "capability": "workspace_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "workspace_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "outside_read",
+            "detail": "",
+            "status": "deny"
+          },
+          {
+            "capability": "outside_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_read",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "home_write",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "environment_canary",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "child_process",
+            "detail": "",
+            "status": "allow"
+          },
+          {
+            "capability": "network_egress",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "docker_socket",
+            "detail": "",
+            "status": "skipped"
+          },
+          {
+            "capability": "ssh_agent_socket",
+            "detail": "",
+            "status": "skipped"
+          }
+        ],
+        "risk_level": "CRITICAL",
+        "run_id": "2ae79d4d942190c0",
+        "runner_exit_code": null,
+        "runner_output": "",
+        "runner_timed_out": false,
+        "schema_version": 1
+      },
+      "runner_status": "completed"
+    }
+  ],
+  "version": "3.12.14"
+}

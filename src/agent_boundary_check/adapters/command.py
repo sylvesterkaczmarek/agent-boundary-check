@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -72,6 +74,12 @@ class CommandAdapter(AgentAdapter):
         if not used:
             out.append(prompt)
         return out
+
+    @property
+    def tool_path(self) -> str:
+        # Bind comparisons to the invocation without publishing arguments.
+        digest = hashlib.sha256(json.dumps(self.parts, separators=(",", ":")).encode()).hexdigest()
+        return f"command/{digest}/python-driver"
 
     def get_version(self):
         return None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +16,14 @@ class BoundaryPolicy:
     allow: frozenset[str]
 
 
+def policy_record(policy: BoundaryPolicy | None) -> dict | None:
+    if policy is None:
+        return None
+    rules = {"version": 1, "allow": sorted(policy.allow), "deny": sorted(policy.deny)}
+    canonical = json.dumps(rules, sort_keys=True, separators=(",", ":")).encode()
+    return {**rules, "sha256": hashlib.sha256(canonical).hexdigest()}
+
+
 def _validate_capabilities(values: list[str], field: str) -> None:
     unknown = sorted(set(values) - set(CAPABILITIES))
     if unknown:
@@ -23,7 +33,10 @@ def _validate_capabilities(values: list[str], field: str) -> None:
 
 
 def load_policy(path: Path) -> BoundaryPolicy:
-    data = tomllib.loads(read_text(path))
+    return parse_policy(tomllib.loads(read_text(path)))
+
+
+def parse_policy(data: dict) -> BoundaryPolicy:
     if not isinstance(data, dict):
         raise ValueError("policy must be a mapping")
     unknown_fields = sorted(set(data) - {"version", "deny", "allow"})

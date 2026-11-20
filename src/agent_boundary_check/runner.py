@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .adapters.base import AgentAdapter
 from .lab import create_lab
+from .observer import observe_files
 from .policy import BoundaryPolicy
 from .report import make_report, parse_probe_payload
 
@@ -58,6 +59,8 @@ def verify(
             runner_output="",
             attestation_key=lab.attestation_key,
             output_limited=run.output_limited,
+            host_observations=observe_files(lab.root, lab.manifest, lab.baseline),
+            tool_path=adapter.tool_path,
         )
         completed = True
         return report, lab if keep_lab else None
