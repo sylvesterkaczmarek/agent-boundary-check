@@ -1,6 +1,6 @@
 # Policy-aware release checks
 
-Install the development checkout with `python -m pip install .`. Supply the same TOML policy when collecting the baseline and the candidate, then run:
+Install version 0.3.0 with `python -m pip install agent-boundary-check==0.3.0`. Supply the same TOML policy when collecting the baseline and the candidate, then run:
 
 ```sh
 agent-boundary diff baseline.json candidate.json --policy team-policy.toml

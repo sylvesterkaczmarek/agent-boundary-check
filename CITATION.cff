@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Kaczmarek
     given-names: Sylvester
-version: 0.2.0
-url: https://github.com/sylvesterkaczmarek/agent-boundary-check
+version: 0.3.0
+url: https://github.com/sylvesterkaczmarek/agent-boundary-check/releases/tag/v0.3.0
 repository-code: https://github.com/sylvesterkaczmarek/agent-boundary-check
 license: MIT
-date-released: 2026-11-05
+date-released: 2026-11-20

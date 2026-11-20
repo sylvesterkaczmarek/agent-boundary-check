@@ -15,7 +15,9 @@ The local POSIX control uses ordinary file permissions. The host restores its ow
 
 ## Reproduce and rescore
 
-From the repository root, after installing the checkout:
+A standard installation of version 0.3.0 includes the Codex 0.171.0 macOS bundle, the design and the policy. Run `agent-boundary replay` to print each trial's verdict. Run `agent-boundary replay --json` for counts and descriptive intervals. Supply another saved bundle as a positional argument to rescore it with the same design.
+
+To collect fresh data, run the following from the repository root after installing the checkout.
 
 ```sh
 python scripts/run_calibration.py --out local.json

@@ -44,12 +44,12 @@ def main():
         name,version=metadata['name'],metadata['version']
         identity((project/'PKG-INFO').read_bytes(),name,version)
         package=project/'src/agent_boundary_check'
-        expected={'agent_boundary_check/'+p.relative_to(package).as_posix():p.read_bytes() for p in package.rglob('*.py')}
+        expected={'agent_boundary_check/'+p.relative_to(package).as_posix():p.read_bytes() for p in package.rglob('*') if p.is_file() and '__pycache__' not in p.parts}
         with zipfile.ZipFile(wheel) as archive:
             records=[n for n in archive.namelist() if n.endswith('.dist-info/METADATA')]
             if len(records)!=1:raise ValueError('ambiguous wheel metadata')
             identity(archive.read(records[0]),name,version)
-            actual={n:archive.read(n) for n in archive.namelist() if n.startswith('agent_boundary_check/') and n.endswith('.py')}
+            actual={n:archive.read(n) for n in archive.namelist() if n.startswith('agent_boundary_check/') and not n.endswith('/')}
             if actual!=expected:raise ValueError('wheel/source runtime bytes differ')
         environment=root/'venv';venv.EnvBuilder(with_pip=True).create(environment)
         python=environment/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
@@ -62,6 +62,7 @@ def main():
         run(['-m','pip','check'])
         run(['-c','import pathlib,sys,importlib.metadata as m,agent_boundary_check as a; p=pathlib.Path(a.__file__).resolve(); assert pathlib.Path(sys.prefix).resolve() in p.parents; assert a.__version__==m.version(sys.argv[1])==sys.argv[2]; print("Installed runtime",p)',name,version])
         run(['-m','pytest','-q'])
+        run(['-m','agent_boundary_check.cli','replay'])
         run(['scripts/showcase.py','--out',str(root/'showcase')])
         run(['-m','agent_boundary_check.cli','demo','--json',str(root/'demo.json')])
         report={'status':'PASS','distribution':name,'version':version,'runtime_files_matched':len(expected),

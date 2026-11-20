@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+20 November 2026.
 
 - Recheck fixture identity and shared marker contents from the host at collection.
 - Record the applied policy and execution route. Distinguish first observations, permission changes and missing prerequisites in report comparisons.
 - Add an offline calibration dataset, pinned CLI study runners and an optional Inspect replay task.
+- Reject repeated run identifiers and mixed checker versions in calibration trials. Report unmeasured rates with their zero denominator.
+- Ship the original four-trial macOS bundle in the wheel. Run `agent-boundary replay` for the verdicts or add `--json` for counts, denominators and descriptive intervals.
 
 ## 0.2.0
 
