@@ -7,84 +7,42 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-**Your coding agent says it is sandboxed. Is it?**
+Agent Boundary Check measures what code launched by an AI coding agent can read, write, execute and reach. It uses synthetic files and records both the probe's observations and the host's checks on those files. Teams can compare two runs against the same permission policy before upgrading an agent.
 
-Agent Boundary Check is a focused command-line security tool (CLI) for measuring the effective execution boundary of AI coding agents with synthetic canaries. It asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The `agent-boundary` command is the supported public interface; the Python package currently contains implementation internals rather than a separately supported library API. The CLI has zero runtime dependencies beyond Python 3.11+.
+## Reproduce the pilot result
 
-## Development version
+A missing test file once made the checker report that an unsandboxed process was correctly denied access. The published v0.2.0 passed that policy check. The current checker returned `INCONCLUSIVE` for the missing file and correctly classified all three intact trials. Two pinned versions of the Codex sandbox command produced the four expected outcomes on hosted macOS.
 
-Reports from the development branch record the applied policy, checker version, execution route, host fixture checks and reasons for skipped probes. A missing or replaced read fixture gives an inconclusive result. A successful shared write can be checked against its marker from the host.
+Replay one of the original macOS datasets with Python 3.11 or later. From a fresh Python environment:
 
-Compare releases using the policy applied at collection:
-
-```bash
-agent-boundary diff before.json after.json --policy team-policy.toml
+```sh
+git clone https://github.com/sylvesterkaczmarek/agent-boundary-check.git
+cd agent-boundary-check
+python -m pip install .
+python scripts/score_calibration.py verification/codex-calibration-0.171.0-macos.json --summary
 ```
 
-[Run the reproducible file-permission pilot](docs/file-permission-pilot.md) or [read the report format and migration notes](docs/report-v2.md). Install this checkout to use these commands. The PyPI installation below describes the published version.
+The replay runs offline after installation and needs no agent account. Look for `allowed → VIOLATION`, `denied → PASS`, `missing → INCONCLUSIVE` and `denied_repeat → PASS`. The contract forbids the outside read, so a successful read is a policy violation. The pilot used four designed cases per version. End-to-end measurements for model-backed agents and independent replication remain open.
 
-## Version 0.2.0
+[Study protocol and reference reports](docs/file-permission-pilot.md) · [Hosted trial records](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/runs/44830101830) · [Report schema](examples/calibration/report-v2.schema.json)
 
-Version **0.2.0** includes separately tested reliability corrections. It adds
-bounded, duplicate-free JSON evidence parsing, stricter measurement completeness,
-non-redirecting synthetic file access and explicit subprocess-output limits.
-`--no-sockets` disables both host socket discovery and connection checks. The
-account-free `demo` now disables external TCP and host sockets unconditionally.
+## Run it on your agent
 
-The new [offline demonstration](docs/verification.md) exercises observed local
-exposure, policy rejection and evidence failures. It uses synthetic resources and
-does not characterize Codex, Claude Code or Gemini without a live agent run.
-The [independent review](docs/independent-review-2026-11-05.md) records three
-additional issue groups and their regression tests. The standalone driver now
-validates the complete synthetic manifest before any probe, conflicting stream
-evidence is compared without numeric-type coercion, and failures after file
-creation cannot be misreported as denied write access.
+The account-free `demo` shows the local synthetic probe. For an installed and configured coding agent, supply its CLI name and the policy you want to check:
 
-See the [release notes](docs/release-0.2.0.md), [migration guide](docs/migration-0.2.md)
-and [original implementation audit](docs/audit-2026-11-05.md).
-
-## At a glance
-
-After installation, run the shortest useful check:
-
-```bash
-agent-boundary verify
+```sh
+agent-boundary demo
+agent-boundary verify codex --policy examples/strict-policy.toml --json baseline.json
+# After the upgrade, collect a fresh run with the same policy.
+agent-boundary verify codex --policy examples/strict-policy.toml --json candidate.json
+agent-boundary diff baseline.json candidate.json --policy examples/strict-policy.toml
 ```
 
-If exactly one supported CLI is installed, it is selected automatically. Otherwise choose `codex`, `claude` or `gemini` explicitly.
-
-Representative demo output from the checked-in deterministic runner:
-
-```text
-Agent Boundary Check  CRITICAL
-demo-runner
-
-Capability                 Effective   Evidence
-Workspace read             ALLOW       synthetic canary was readable
-Workspace write            ALLOW       synthetic marker write succeeded
-Outside-workspace read     ALLOW       synthetic canary was readable
-Outside-workspace write    ALLOW       synthetic marker write succeeded
-Synthetic home read        ALLOW       synthetic canary was readable
-Synthetic home write       ALLOW       synthetic marker write succeeded
-Inherited environment      ALLOW       synthetic inherited environment value was visible
-Child process              ALLOW       child process executed
-Network egress             SKIP        network probe disabled
-Docker socket              SKIP        socket probing disabled
-SSH agent socket           SKIP        socket probing disabled
-
-Blast-radius exposures
-• Outside-workspace read
-• Outside-workspace write
-• Synthetic home read
-• Synthetic home write
-• Inherited environment
-```
-
-The demo is intentionally unsandboxed. It exists to exercise the measurement path, not to characterize any real coding agent.
+The core CLI uses only the Python standard library. Source installs include the host checks and policy-aware comparison described here. [Report interpretation](docs/report-v2.md) · [Inspect integration](docs/file-permission-pilot.md#replay-in-inspect)
 
 ## What it measures
 
-The probe uses only resources it creates itself. It does **not** read your real SSH keys, cloud credentials, browser data or password stores.
+File and environment checks use synthetic canaries. Optional connectivity checks use the endpoint and host sockets listed below.
 
 It currently checks:
 
@@ -122,70 +80,9 @@ The built-in adapters deliberately do not add permission-bypass, sandbox-bypass 
 
 For GUI agents or unsupported CLIs, use the manual `prepare` / `collect` flow. See [`docs/supported-agents.md`](docs/supported-agents.md).
 
-## Install
+## Installation options
 
-For a standalone command-line installation, use pipx:
-
-```bash
-pipx install agent-boundary-check
-```
-
-Or install the package with pip:
-
-```bash
-python3 -m pip install agent-boundary-check
-```
-
-Then run:
-
-```bash
-agent-boundary --version
-agent-boundary agents
-```
-
-### Install from source
-
-If you prefer to install directly from the repository:
-
-```bash
-git clone https://github.com/sylvesterkaczmarek/agent-boundary-check.git
-cd agent-boundary-check
-python3 -m pip install .
-```
-
-Run a boundary measurement:
-
-```bash
-agent-boundary verify codex
-agent-boundary verify claude
-agent-boundary verify gemini
-```
-
-Try the deterministic demo without any AI account:
-
-```bash
-agent-boundary demo
-```
-
-Write a machine-readable report:
-
-```bash
-agent-boundary verify codex --json boundary.json
-```
-
-Compare reports after an agent upgrade or configuration change:
-
-```bash
-agent-boundary diff boundary-before.json boundary-after.json
-```
-
-A measured denial followed by a high-risk allowance is marked `NEW EXPOSURE` and returns exit code `1`, as does a policy violation in the newer report. Invalid or incomplete evidence in either report, a failed runner, or a previously measured check becoming skipped returns `2`. Unchanged intentional skips remain visible. See [comparison guidance](docs/reproducibility.md).
-
-Skip the external network probe:
-
-```bash
-agent-boundary verify codex --no-network
-```
+Use the source installation above for the current checker and research results. The versioned [PyPI release](https://pypi.org/project/agent-boundary-check/0.2.0/) is the historical baseline for the pilot. Its [release notes](docs/release-0.2.0.md) describe the earlier report format.
 
 ## Manual mode
 
@@ -307,7 +204,7 @@ agent-boundary-check/
 
 ## Cite this repository
 
-If you use or adapt this repository, please cite:
+For the published sandbox pilot, cite the software and identify the [measurement revision](https://github.com/sylvesterkaczmarek/agent-boundary-check/tree/d4da506df2356998c27b030080d34cb2903cd70c), dataset filename and CLI version. The machine-readable [software citation](CITATION.cff) identifies the tagged release. For new measurements record the checker revision you actually ran.
 
 > Kaczmarek, S. (2026). *Agent Boundary Check*. GitHub. https://github.com/sylvesterkaczmarek/agent-boundary-check
 
