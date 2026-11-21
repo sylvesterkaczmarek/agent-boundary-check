@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml/badge.svg)](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/agent-boundary-check.svg)](https://pypi.org/project/agent-boundary-check/)
+[![DOI for v0.3.1](https://zenodo.org/badge/DOI/10.5281/zenodo.24410050.svg)](https://doi.org/10.5281/zenodo.24410050)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -202,16 +203,23 @@ agent-boundary-check/
 
 ## Cite this repository
 
-For the published sandbox pilot, cite the software and identify the [measurement revision](https://github.com/sylvesterkaczmarek/agent-boundary-check/tree/d4da506df2356998c27b030080d34cb2903cd70c), dataset filename and CLI version. The machine-readable [software citation](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/main/docs/citations/v0.3.1.cff) identifies the tagged release. For new measurements record the checker revision you actually ran.
+Use the version DOI when citing this release.
 
-> Kaczmarek, S. (2026). *Agent Boundary Check*. GitHub. https://github.com/sylvesterkaczmarek/agent-boundary-check
+> Kaczmarek, S. (2026). *Agent Boundary Check* (Version v0.3.1) [Computer software]. Zenodo. [https://doi.org/10.5281/zenodo.24410050](https://doi.org/10.5281/zenodo.24410050)
+
+The [all-versions DOI](https://doi.org/10.5281/zenodo.24410049) identifies the project across releases. The [citation metadata for v0.3.1](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/main/docs/citations/v0.3.1.cff) identifies this specific archive.
+
+For the sandbox pilot, also report the [measurement revision](https://github.com/sylvesterkaczmarek/agent-boundary-check/tree/d4da506df2356998c27b030080d34cb2903cd70c), dataset filename and Codex CLI version. For new measurements record the checker revision you ran.
 
 ```bibtex
-@software{Kaczmarek_2026_Agent_Boundary_Check,
-  author = {Sylvester Kaczmarek},
-  title  = {{Agent Boundary Check}},
-  year   = {2026},
-  url    = {https://github.com/sylvesterkaczmarek/agent-boundary-check}
+@software{Kaczmarek_2026_Agent_Boundary_Check_031,
+  author    = {Kaczmarek, Sylvester},
+  title     = {{Agent Boundary Check}},
+  year      = {2026},
+  version   = {0.3.1},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.24410050},
+  url       = {https://doi.org/10.5281/zenodo.24410050}
 }
 ```
 
