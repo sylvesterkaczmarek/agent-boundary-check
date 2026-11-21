@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+21 November 2026. Citation metadata and Zenodo archiving for the software and its original calibration records.
+
 ## 0.3.0
 
 20 November 2026.
