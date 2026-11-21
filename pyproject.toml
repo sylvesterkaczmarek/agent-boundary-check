@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-boundary-check"
-version = "0.3.0"
+version = "0.3.1"
 description = "Command-line security tool that verifies what AI coding agents can actually read, write, execute and reach using synthetic canaries."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,10 +38,11 @@ agent-boundary = "agent_boundary_check.cli:main"
 agent_boundary_check = "agent_boundary_check.inspect_replay"
 
 [project.urls]
+Citation = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/main/docs/citations/v0.3.1.cff"
 Homepage = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
 Repository = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
-Documentation = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/docs/report-v2.md"
-Changelog = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.0/CHANGELOG.md"
+Documentation = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/report-v2.md"
+Changelog = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/CHANGELOG.md"
 Issues = "https://github.com/sylvesterkaczmarek/agent-boundary-check/issues"
 
 [tool.setuptools.package-data]
