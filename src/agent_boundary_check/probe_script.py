@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from importlib.resources import files
+
 # This source is copied into the synthetic lab. It intentionally uses only the
 # Python standard library so it can run inside restricted agent environments.
-PROBE_DRIVER_SOURCE = r'''#!/usr/bin/env python3
+PROBE_DRIVER_SOURCE = (files('agent_boundary_check').joinpath('safe_files.py').read_text(encoding='utf-8')
+                       + '\n' + files('agent_boundary_check').joinpath('manifest.py').read_text(encoding='utf-8')) + r'''
+
+import errno
 import hashlib
 import hmac
 import json
@@ -15,19 +20,26 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MANIFEST = json.loads((HERE / "manifest.json").read_text(encoding="utf-8"))
+try:
+    MANIFEST = parse_manifest(read_regular_bytes(HERE / "manifest.json", limit=1048576).decode("utf-8"), HERE)
+except (ValueError, OSError, UnicodeError) as exc:
+    print("Invalid probe manifest; no probes were attempted: " + type(exc).__name__, file=sys.stderr)
+    raise SystemExit(2)
 RESULTS = []
 
 
-def add(capability, status, detail=""):
-    RESULTS.append({"capability": capability, "status": status, "detail": detail})
+def add(capability, status, detail="", reason=None):
+    entry = {"capability": capability, "status": status, "detail": detail}
+    if reason is not None:
+        entry["reason"] = reason
+    RESULTS.append(entry)
 
 
 def read_token(capability, path, token):
     try:
         # Access is what this probe measures. Arbitrary readable bytes still
         # prove access, even when they are not valid UTF-8.
-        value = Path(path).read_bytes()
+        value = read_regular_bytes(path, limit=len(token.encode("utf-8")), prefix_only=True)
         if value == token.encode("utf-8"):
             add(capability, "allow", "synthetic canary was readable")
         else:
@@ -36,7 +48,7 @@ def read_token(capability, path, token):
         add(capability, "deny", "permission denied")
     except FileNotFoundError:
         add(capability, "deny", "previously created canary path is not visible; this does not identify whether it was hidden or removed")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         add(capability, "error", f"read could not be tested: {type(exc).__name__}: {exc}")
 
 
@@ -45,8 +57,7 @@ def write_marker(capability, path, token):
     try:
         # Exclusive creation must not truncate a pre-existing file or follow a
         # marker symlink. Prepare a fresh lab for each execution.
-        with target.open("x", encoding="utf-8") as marker:
-            marker.write(token)
+        write_new_text(target, token)
     except PermissionError:
         add(capability, "deny", "permission denied")
         return
@@ -56,13 +67,16 @@ def write_marker(capability, path, token):
     except FileExistsError:
         add(capability, "error", "marker already exists; prepare a fresh lab without overwriting existing files")
         return
-    except OSError as exc:
-        add(capability, "error", f"write could not be tested: {type(exc).__name__}: {exc}")
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, OSError) and exc.errno == errno.EROFS:
+            add(capability, "deny", "file creation was rejected by a read-only filesystem")
+        else:
+            add(capability, "error", f"write could not be tested: {type(exc).__name__}: {exc}")
         return
 
     try:
-        value = target.read_bytes()
-    except OSError as exc:
+        value = read_regular_bytes(target, limit=len(token.encode("utf-8")), prefix_only=True)
+    except (OSError, ValueError) as exc:
         add(capability, "allow", f"write succeeded; readback was unavailable: {type(exc).__name__}: {exc}")
         return
     if value == token.encode("utf-8"):
@@ -79,7 +93,7 @@ read_token("home_read", MANIFEST["home_read_path"], MANIFEST["home_read_token"])
 write_marker("home_write", MANIFEST["home_write_path"], MANIFEST["home_write_token"])
 
 if not MANIFEST.get("environment_probe", True):
-    add("environment_canary", "skipped", "manual mode cannot inject a transient environment canary into an already-running agent")
+    add("environment_canary", "skipped", "manual mode cannot inject a transient environment canary into an already-running agent", "manual_environment")
 else:
     try:
         value = os.environ.get("AGENT_BOUNDARY_CANARY_SECRET")
@@ -97,7 +111,7 @@ else:
 
 try:
     proc = subprocess.run(
-        [sys.executable, "-c", "print('AGENT_BOUNDARY_CHILD_OK')"],
+        [sys.executable, "-I", "-S", "-c", "print('AGENT_BOUNDARY_CHILD_OK')"],
         capture_output=True,
         text=True,
         timeout=5,
@@ -113,9 +127,9 @@ except OSError as exc:
     add("child_process", "error", f"child process execution could not be tested: {type(exc).__name__}: {exc}")
 
 if not MANIFEST.get("network_probe", True):
-    add("network_egress", "skipped", "network probe disabled")
+    add("network_egress", "skipped", "network probe disabled", "disabled")
 elif not MANIFEST.get("network_host_reachable", False):
-    add("network_egress", "skipped", "host baseline could not reach example.com:443; agent result is inconclusive")
+    add("network_egress", "skipped", "host baseline could not reach example.com:443; agent result is inconclusive", "baseline_unavailable")
 else:
     try:
         with socket.create_connection(("example.com", 443), timeout=3):
@@ -128,17 +142,23 @@ else:
 
 
 def socket_connect(capability, path, host_present, host_connectable, probe_supported):
+    if not MANIFEST.get("socket_probe", True):
+        add(capability, "skipped", "socket probing disabled; no host socket discovery or connection attempted", "disabled")
+        return
+    if capability == "docker_socket" and not MANIFEST.get("docker_transport_supported", True):
+        add(capability, "skipped", "configured Docker transport is outside the Unix socket probe scope", "unsupported")
+        return
     if not probe_supported:
-        add(capability, "skipped", "Unix socket probe is unsupported on this platform; Windows named pipes are not tested")
+        add(capability, "skipped", "Unix socket probe is unsupported on this platform; Windows named pipes are not tested", "unsupported")
         return
     if not host_present:
         add(capability, "absent", "socket not present on host")
         return
     if not host_connectable:
-        add(capability, "skipped", "host baseline could not connect; agent comparison is inconclusive")
+        add(capability, "skipped", "host baseline could not connect; agent comparison is inconclusive", "baseline_unavailable")
         return
     if not path or not hasattr(socket, "AF_UNIX"):
-        add(capability, "skipped", "Unix socket probing is unavailable on this platform")
+        add(capability, "skipped", "Unix socket probing is unavailable on this platform", "unsupported")
         return
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -184,9 +204,8 @@ if isinstance(key, str) and key:
 payload = body
 encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 try:
-    with (HERE / "results.json").open("x", encoding="utf-8") as results_file:
-        results_file.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-except OSError:
+    write_new_text(HERE / "results.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
+except (OSError, ValueError):
     pass
 print("AGENT_BOUNDARY_RESULT=" + encoded)
 '''

@@ -1,0 +1,4 @@
+# Include this step after collecting fresh reports from both release candidates.
+# Install the same checker revision for collection and comparison.
+- name: Verify the team's file permission policy
+  run: agent-boundary diff baseline.json candidate.json --policy team-policy.toml --review-first-access

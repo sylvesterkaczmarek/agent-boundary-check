@@ -9,11 +9,15 @@ import tempfile
 from pathlib import Path
 
 from . import __version__
+from .calibration import DEFAULT_BUNDLE, replay
+from .evidence_io import read_json
+from .manifest import validate_manifest
 from .adapters import BUILTIN_ADAPTERS, detect_agents, get_adapter
 from .adapters.command import CommandAdapter
 from .diffing import diff_reports, load_report
 from .lab import RUN_ID_RE, cleanup_home_canary_for_run, create_lab
 from .models import ProbeStatus
+from .observer import BASELINE, RECEIPT, collect_observations, save_receipt
 from .policy import load_policy
 from .render import render_report, safe_text
 from .report import make_report, parse_probe_payload
@@ -130,6 +134,7 @@ def cmd_verify(args) -> int:
             adapter,
             timeout=args.timeout,
             network_probe=not args.no_network,
+            socket_probe=not args.no_sockets,
             policy=policy,
             keep_lab=args.keep_lab,
         )
@@ -154,8 +159,9 @@ def cmd_verify(args) -> int:
 def cmd_demo(args) -> int:
     command = f'"{sys.executable}" .agent-boundary/probe_driver.py'
     adapter = CommandAdapter(command)
-    report, _ = verify(adapter, timeout=30, network_probe=False, policy=None, keep_lab=False)
+    report, _ = verify(adapter, timeout=30, network_probe=False, socket_probe=False, policy=None, keep_lab=False)
     report.agent = "demo-runner"
+    report.tool_path = "demo/local-python-driver"
     render_report(report)
     try:
         _write_json(report, Path(args.json) if args.json else None)
@@ -167,7 +173,7 @@ def cmd_demo(args) -> int:
 
 def cmd_prepare(args) -> int:
     try:
-        lab = create_lab(Path(args.output), network_probe=not args.no_network, environment_probe=False)
+        lab = create_lab(Path(args.output), network_probe=not args.no_network, environment_probe=False, socket_probe=not args.no_sockets)
     except (ValueError, OSError) as exc:
         _error(str(exc))
         return 2
@@ -180,6 +186,8 @@ def cmd_prepare(args) -> int:
 
 
 def cmd_collect(args) -> int:
+    if not args.tool_path.strip() or len(args.tool_path) > 240:
+        raise ValueError("tool path must contain 1 to 240 characters")
     root = _resolve_path(Path(args.lab))
     manifest_path = root / "workspace" / ".agent-boundary" / "manifest.json"
     results_path = root / "workspace" / ".agent-boundary" / "results.json"
@@ -188,10 +196,11 @@ def cmd_collect(args) -> int:
             "manifest.json", "results.json", "probe_driver.py", "PROMPT.txt",
         )) + ((Path(args.policy),) if args.policy else ())
         output = Path(args.json) if args.json else None
+        protected += (root / BASELINE, root / RECEIPT)
         _validate_output(output, protected)
         if not manifest_path.exists():
             raise ValueError("lab manifest not found")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = validate_manifest(read_json(manifest_path, strict_parents=True), manifest_path.parent)
         if not isinstance(manifest, dict):
             raise ValueError("lab manifest must be a mapping")
         if type(manifest.get("schema_version")) is not int or manifest.get("schema_version") != 1:
@@ -214,6 +223,7 @@ def cmd_collect(args) -> int:
             if _resolve_path(output).is_relative_to(canary_directory):
                 raise ValueError("report output cannot be inside the home canary directory scheduled for cleanup")
         payload = parse_probe_payload(results_path, "")
+        states, binding = collect_observations(root, manifest, payload)
         report = make_report(
             run_id=run_id,
             agent="manual",
@@ -225,6 +235,8 @@ def cmd_collect(args) -> int:
             timed_out=False,
             runner_output="",
             attestation_key=attestation_key,
+            host_observations=states,
+            tool_path=args.tool_path,
         )
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as exc:
         _error(str(exc))
@@ -232,11 +244,11 @@ def cmd_collect(args) -> int:
 
     render_report(report)
     try:
+        if not _has_unusable_evidence(report):
+            save_receipt(root, binding, states)
         _write_json(report, output, protected)
     except (ValueError, OSError) as exc:
         _error(str(exc))
-        if not _has_unusable_evidence(report):
-            cleanup_home_canary_for_run(run_id, lab_root=root, attestation_key=attestation_key)
         return 2
     if _has_unusable_evidence(report):
         return 2
@@ -250,11 +262,13 @@ def cmd_diff(args) -> int:
     try:
         before = load_report(Path(args.before))
         after = load_report(Path(args.after))
-        result = diff_reports(before, after)
+        result = diff_reports(before, after, policy=_policy(args))
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as exc:
         _error(str(exc))
         return 2
     print("Agent Boundary Diff")
+    if before["schema_version"] == 1 or after["schema_version"] == 1:
+        print("Legacy report: tool path, fixture observations and applied policy are unavailable.")
     print(f"Agent: {safe_text(result.before_agent)} -> {safe_text(result.after_agent)}")
     print(f"Version: {safe_text(result.before_version or '-')} -> {safe_text(result.after_version or '-')}")
     print(f"Risk: {result.before_risk} -> {result.after_risk}")
@@ -272,10 +286,20 @@ def cmd_diff(args) -> int:
         print("\nCapability changes")
         for change in result.changes:
             suffix = "  NEW EXPOSURE" if change.new_exposure else ""
-            print(f"• {change.capability}: {change.before} -> {change.after}{suffix}")
+            if change.first_observation:
+                suffix = "  FIRST OBSERVED ACCESS"
+            old = change.before_reason or change.before
+            new = change.after_reason or change.after
+            print(f"• {change.capability}: {old} -> {new}{suffix}")
     if result.has_unusable_evidence:
         return 2
-    return 1 if result.has_new_exposure or result.after_policy_violations else 0
+    review = args.review_first_access and any(c.first_observation for c in result.changes)
+    return 1 if result.has_new_exposure or result.after_policy_violations or review else 0
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    replay(args.bundle, summary=not args.json)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -294,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument("--command", help="custom command template; supports {prompt} and {prompt_file}")
     verify_p.add_argument("--timeout", type=_positive_int, default=180)
     verify_p.add_argument("--no-network", action="store_true", help="skip the TCP egress probe")
+    verify_p.add_argument("--no-sockets", action="store_true", help="skip host socket discovery and connection probes")
     verify_p.add_argument("--policy", help="optional TOML boundary policy")
     verify_p.add_argument("--json", help="write machine-readable report")
     verify_p.add_argument("--keep-lab", action="store_true", help="retain the synthetic workspace after the run")
@@ -303,20 +328,30 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--json", help="write machine-readable report")
     demo.set_defaults(func=cmd_demo)
 
+    replay_p = sub.add_parser("replay", help="rescore recorded calibration trials offline")
+    replay_p.add_argument("bundle", type=Path, nargs="?", default=DEFAULT_BUNDLE,
+                          help="calibration JSON file (default: bundled Codex 0.171.0 macOS trials)")
+    replay_p.add_argument("--json", action="store_true", help="print counts, rates and uncertainty as JSON")
+    replay_p.set_defaults(func=cmd_replay)
+
     prepare = sub.add_parser("prepare", help="prepare a manual lab for unsupported or GUI coding agents")
     prepare.add_argument("--output", required=True, help="empty directory to create")
     prepare.add_argument("--no-network", action="store_true")
+    prepare.add_argument("--no-sockets", action="store_true")
     prepare.set_defaults(func=cmd_prepare)
 
     collect = sub.add_parser("collect", help="collect results from a manually-run boundary lab")
     collect.add_argument("lab")
     collect.add_argument("--policy")
+    collect.add_argument("--tool-path", default="manual/python-driver", help="stable label for the manual execution route")
     collect.add_argument("--json")
     collect.set_defaults(func=cmd_collect)
 
     diff_p = sub.add_parser("diff", help="compare two JSON boundary reports")
     diff_p.add_argument("before")
     diff_p.add_argument("after")
+    diff_p.add_argument("--policy", help="require the recorded policy and rescore both reports")
+    diff_p.add_argument("--review-first-access", action="store_true", help="also flag first observed risky access")
     diff_p.set_defaults(func=cmd_diff)
     return parser
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-boundary-check"
-version = "0.1.2"
+version = "0.3.1"
 description = "Command-line security tool that verifies what AI coding agents can actually read, write, execute and reach using synthetic canaries."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,21 +24,35 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+inspect = ["inspect-ai>=0.3.291,<0.4"]
 dev = [
   "pytest>=8.0",
   "build>=1.2",
+  "ruff>=0.11,<1",
 ]
 
 [project.scripts]
 agent-boundary = "agent_boundary_check.cli:main"
 
+[project.entry-points.inspect_ai]
+agent_boundary_check = "agent_boundary_check.inspect_replay"
+
 [project.urls]
+Citation = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/main/docs/citations/v0.3.1.cff"
 Homepage = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
 Repository = "https://github.com/sylvesterkaczmarek/agent-boundary-check"
+Documentation = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/report-v2.md"
+Changelog = "https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/CHANGELOG.md"
 Issues = "https://github.com/sylvesterkaczmarek/agent-boundary-check/issues"
+
+[tool.setuptools.package-data]
+agent_boundary_check = ["reference/*.json", "reference/*.toml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["F"]

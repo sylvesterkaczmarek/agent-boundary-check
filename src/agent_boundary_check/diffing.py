@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import json
+from .evidence_io import read_json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import CAPABILITIES, RISKY_CAPABILITIES, ProbeResult
-from .report import risk_summary
+from .models import SKIPPABLE_CAPABILITIES, CAPABILITIES, RISKY_CAPABILITIES, ProbeResult
+from .report import fixture_issue, risk_summary
+from .observer import validate_observations
+from .policy import BoundaryPolicy, evaluate_policy, parse_policy, policy_record
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,9 @@ class CapabilityChange:
     before: str
     after: str
     new_exposure: bool
+    first_observation: bool = False
+    before_reason: str | None = None
+    after_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,7 +47,7 @@ class ReportDiff:
 
 
 def load_report(path: Path) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_json(path)
     _validate_report(data, source=str(path))
     return data
 
@@ -51,9 +56,25 @@ def _validate_report(data: dict, *, source: str) -> None:
     if (
         not isinstance(data, dict)
         or type(data.get("schema_version")) is not int
-        or data.get("schema_version") != 1
+        or data.get("schema_version") not in (1, 2)
     ):
         raise ValueError(f"unsupported report schema: {source}")
+    if data["schema_version"] == 2:
+        if data.get("fixture_profile") != "shared-files-v1":
+            raise ValueError(f"unknown fixture profile: {source}")
+        for key in ("run_id", "platform", "tool_path", "checker_version", "fixture_profile"):
+            if not isinstance(data.get(key), str) or not data[key].strip():
+                raise ValueError(f"missing {key}: {source}")
+        validate_observations(data.get("host_observations"))
+        if "policy" not in data:
+            raise ValueError(f"missing policy provenance: {source}")
+        if data["policy"] is not None:
+            record = data["policy"]
+            if not isinstance(record, dict):
+                raise ValueError(f"invalid policy provenance: {source}")
+            rules = parse_policy({k: v for k, v in record.items() if k != "sha256"})
+            if policy_record(rules) != record:
+                raise ValueError(f"policy digest or normalisation mismatch: {source}")
     probes = data.get("probes")
     if not isinstance(probes, list):
         raise ValueError(f"report has no probes: {source}")
@@ -64,6 +85,8 @@ def _validate_report(data: dict, *, source: str) -> None:
             probe = ProbeResult.from_dict(item)
         except ValueError as exc:
             raise ValueError(f"report contains an invalid probe entry: {exc}: {source}") from exc
+        if data["schema_version"] == 2 and probe.status.value == "skipped" and not probe.reason:
+            raise ValueError(f"skip reason missing: {source}")
         capability = probe.capability
         if capability in seen:
             raise ValueError(f"report contains duplicate capability {capability}: {source}")
@@ -97,7 +120,16 @@ def _evidence_issues(data: dict) -> list[str]:
     elif data.get("runner_exit_code") not in (None, 0):
         issues.append(f"agent runner exited with status {data['runner_exit_code']}")
     for item in data["probes"]:
-        if item["status"] in {"unknown", "error"}:
+        if data["schema_version"] == 2:
+            probe = ProbeResult.from_dict(item)
+            issue = fixture_issue(probe, data["host_observations"])
+            if issue:
+                issues.append(f"{probe.capability}: {issue}")
+            if probe.reason == "baseline_unavailable":
+                issues.append(f"{probe.capability}: host prerequisite unavailable")
+        if item["status"] in {"unknown", "error"} or (
+            item["status"] == "skipped" and item["capability"] not in SKIPPABLE_CAPABILITIES
+        ):
             issues.append(f"{item['capability']}: {item['status']}")
     if not data["evidence_complete"] and not issues:
         issues.append("report marks the probe evidence incomplete")
@@ -115,38 +147,77 @@ def _risk_from_evidence(data: dict, issues: list[str]) -> str:
     return level
 
 
-def diff_reports(before: dict, after: dict) -> ReportDiff:
-    _validate_report(before, source="before report")
-    _validate_report(after, source="after report")
-    before_map = {str(item["capability"]): str(item["status"]) for item in before["probes"]}
-    after_map = {str(item["capability"]): str(item["status"]) for item in after["probes"]}
-    changes: list[CapabilityChange] = []
+def _violations(data: dict, policy: BoundaryPolicy | None) -> list[str]:
+    if policy is None:
+        if data["schema_version"] == 1:
+            return list(data.get("policy_violations", []))
+        record = data["policy"]
+        if record is None:
+            return []
+        policy = parse_policy({k: v for k, v in record.items() if k != "sha256"})
+    return evaluate_policy([ProbeResult.from_dict(p) for p in data["probes"]], policy)
+
+
+def assess_report(data: dict, *, policy: BoundaryPolicy | None = None) -> tuple[list[str], list[str]]:
+    """Return evidence issues and policy violations for one recorded run."""
+    _validate_report(data, source="report")
+    issues = _evidence_issues(data)
+    if policy is not None:
+        if data["schema_version"] == 1 or data.get("policy") != policy_record(policy):
+            issues.append("report lacks the required policy provenance")
+        required = policy.allow | policy.deny
+        for probe in data["probes"]:
+            if probe["capability"] in required and probe["status"] == "skipped":
+                issues.append(f"{probe['capability']}: required measurement skipped")
+    return issues, _violations(data, policy)
+
+
+def diff_reports(before: dict, after: dict, *, policy: BoundaryPolicy | None = None) -> ReportDiff:
+    before_issues, before_violations = assess_report(before, policy=policy)
+    after_issues, after_violations = assess_report(after, policy=policy)
+    before_v2 = before["schema_version"] == 2
+    after_v2 = after["schema_version"] == 2
+    if before_v2 != after_v2:
+        after_issues.append("legacy report lacks policy, tool and fixture provenance")
+    comparable = before_v2 == after_v2
+    if not before_v2 and not after_v2 and before.get("policy_violations") and not after.get("policy_violations"):
+        after_issues.append("historical policy changed or violation resolved; legacy provenance unavailable")
+    if before_v2 and after_v2:
+        if before["run_id"] == after["run_id"]:
+            comparable = False
+            after_issues.append("the reports describe the same run; collect a fresh candidate")
+        if before["policy"] != after["policy"]:
+            after_issues.append("applied policy changed or was omitted")
+        for field in ("tool_path", "fixture_profile", "agent", "platform", "probe_platform"):
+            if before.get(field) != after.get(field):
+                comparable = False
+                after_issues.append(f"{field} changed; confirm comparability in a matched run")
+    before_map = {item["capability"]: item for item in before["probes"]}
+    after_map = {item["capability"]: item for item in after["probes"]}
+    changes = []
     for capability in CAPABILITIES:
-        old = before_map.get(capability, "missing")
-        new = after_map.get(capability, "missing")
-        if old == new:
+        left, right = before_map[capability], after_map[capability]
+        old, new = left["status"], right["status"]
+        old_reason, new_reason = left.get("reason"), right.get("reason")
+        if old == new and old_reason == new_reason:
             continue
-        new_exposure = capability in RISKY_CAPABILITIES and new == "allow" and old != "allow"
-        changes.append(CapabilityChange(capability, old, new, new_exposure))
-    before_issues = _evidence_issues(before)
-    after_issues = _evidence_issues(after)
-    after_issues.extend(
-        f"{change.capability}: previously measured capability is now skipped"
-        for change in changes
-        if change.before in {"allow", "deny", "absent"} and change.after == "skipped"
-    )
+        allowed = capability in RISKY_CAPABILITIES and new == "allow"
+        changes.append(CapabilityChange(capability, old, new, allowed and old == "deny" and comparable,
+                                        allowed and (old != "deny" or not comparable), old_reason, new_reason))
+        if old in {"allow", "deny", "absent"} and new == "skipped":
+            after_issues.append(f"{capability}: previously measured capability is now skipped")
     return ReportDiff(
-        before_agent=str(before.get("agent", "unknown")),
-        after_agent=str(after.get("agent", "unknown")),
+        before_agent=before["agent"],
+        after_agent=after["agent"],
         before_version=before.get("agent_version"),
         after_version=after.get("agent_version"),
-        before_risk=_risk_from_evidence(before, before_issues),
-        after_risk=_risk_from_evidence(after, after_issues),
+        before_risk=_risk_from_evidence({**before, "policy_violations": before_violations}, before_issues),
+        after_risk=_risk_from_evidence({**after, "policy_violations": after_violations}, after_issues),
         changes=changes,
         before_evidence_issues=before_issues,
         after_evidence_issues=after_issues,
-        before_policy_violations=list(before.get("policy_violations", [])),
-        after_policy_violations=list(after.get("policy_violations", [])),
+        before_policy_violations=before_violations,
+        after_policy_violations=after_violations,
         before_skipped=[p["capability"] for p in before["probes"] if p["status"] == "skipped"],
         after_skipped=[p["capability"] for p in after["probes"] if p["status"] == "skipped"],
     )

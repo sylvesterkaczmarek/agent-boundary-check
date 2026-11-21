@@ -4,6 +4,8 @@ import os
 import tomllib
 from pathlib import Path
 
+from ..evidence_io import read_text
+
 from .base import AgentAdapter, display_path
 
 
@@ -22,8 +24,8 @@ class CodexAdapter(AgentAdapter):
             return {"config_file": None}
         hints: dict = {"config_file": display_path(path)}
         try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+            data = tomllib.loads(read_text(path))
+        except (OSError, UnicodeError, ValueError):
             hints["config_parse"] = "failed"
             return hints
         for key in ("sandbox_mode", "approval_policy", "default_permissions"):

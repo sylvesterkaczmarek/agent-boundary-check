@@ -1,0 +1,3 @@
+version = 1
+allow = ["workspace_read"]
+deny = ["outside_read"]

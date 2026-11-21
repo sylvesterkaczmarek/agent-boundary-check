@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .evidence_io import read_text
 from .models import CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, ProbeStatus
 
 
@@ -11,6 +14,14 @@ from .models import CAPABILITIES, OPTIONAL_RESOURCE_CAPABILITIES, ProbeResult, P
 class BoundaryPolicy:
     deny: frozenset[str]
     allow: frozenset[str]
+
+
+def policy_record(policy: BoundaryPolicy | None) -> dict | None:
+    if policy is None:
+        return None
+    rules = {"version": 1, "allow": sorted(policy.allow), "deny": sorted(policy.deny)}
+    canonical = json.dumps(rules, sort_keys=True, separators=(",", ":")).encode()
+    return {**rules, "sha256": hashlib.sha256(canonical).hexdigest()}
 
 
 def _validate_capabilities(values: list[str], field: str) -> None:
@@ -22,7 +33,10 @@ def _validate_capabilities(values: list[str], field: str) -> None:
 
 
 def load_policy(path: Path) -> BoundaryPolicy:
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return parse_policy(tomllib.loads(read_text(path)))
+
+
+def parse_policy(data: dict) -> BoundaryPolicy:
     if not isinstance(data, dict):
         raise ValueError("policy must be a mapping")
     unknown_fields = sorted(set(data) - {"version", "deny", "allow"})

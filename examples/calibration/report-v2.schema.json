@@ -1,0 +1,478 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Boundary Check report v2",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "checker_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixture_profile": {
+      "const": "shared-files-v1"
+    },
+    "tool_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platform": {
+      "type": "string"
+    },
+    "probe_platform": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "risk_level": {
+      "enum": [
+        "UNKNOWN",
+        "PARTIAL",
+        "LOW",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "evidence_complete": {
+      "type": "boolean"
+    },
+    "evidence_error": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "runner_exit_code": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "runner_timed_out": {
+      "type": "boolean"
+    },
+    "runner_output": {
+      "type": "string"
+    },
+    "declared_hints": {
+      "type": "object"
+    },
+    "exposures": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "workspace_read",
+          "workspace_write",
+          "outside_read",
+          "outside_write",
+          "home_read",
+          "home_write",
+          "environment_canary",
+          "child_process",
+          "network_egress",
+          "docker_socket",
+          "ssh_agent_socket"
+        ]
+      }
+    },
+    "policy_violations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "policy": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "allow": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "workspace_read",
+                  "workspace_write",
+                  "outside_read",
+                  "outside_write",
+                  "home_read",
+                  "home_write",
+                  "environment_canary",
+                  "child_process",
+                  "network_egress",
+                  "docker_socket",
+                  "ssh_agent_socket"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "deny": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "workspace_read",
+                  "workspace_write",
+                  "outside_read",
+                  "outside_write",
+                  "home_read",
+                  "home_write",
+                  "environment_canary",
+                  "child_process",
+                  "network_egress",
+                  "docker_socket",
+                  "ssh_agent_socket"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "version",
+            "allow",
+            "deny",
+            "sha256"
+          ]
+        }
+      ]
+    },
+    "host_observations": {
+      "type": "object",
+      "properties": {
+        "workspace_read": {
+          "enum": [
+            "intact",
+            "changed",
+            "unavailable"
+          ]
+        },
+        "workspace_write": {
+          "enum": [
+            "marker_absent",
+            "marker_verified",
+            "unavailable",
+            "changed"
+          ]
+        },
+        "outside_read": {
+          "enum": [
+            "intact",
+            "changed",
+            "unavailable"
+          ]
+        },
+        "outside_write": {
+          "enum": [
+            "marker_absent",
+            "marker_verified",
+            "unavailable",
+            "changed"
+          ]
+        },
+        "home_read": {
+          "enum": [
+            "intact",
+            "changed",
+            "unavailable"
+          ]
+        },
+        "home_write": {
+          "enum": [
+            "marker_absent",
+            "marker_verified",
+            "unavailable",
+            "changed"
+          ]
+        }
+      },
+      "required": [
+        "workspace_read",
+        "workspace_write",
+        "outside_read",
+        "outside_write",
+        "home_read",
+        "home_write"
+      ],
+      "additionalProperties": false
+    },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "enum": [
+              "workspace_read",
+              "workspace_write",
+              "outside_read",
+              "outside_write",
+              "home_read",
+              "home_write",
+              "environment_canary",
+              "child_process",
+              "network_egress",
+              "docker_socket",
+              "ssh_agent_socket"
+            ]
+          },
+          "status": {
+            "enum": [
+              "allow",
+              "deny",
+              "absent",
+              "skipped",
+              "error",
+              "unknown"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              null,
+              "disabled",
+              "unsupported",
+              "manual_environment",
+              "baseline_unavailable"
+            ]
+          }
+        },
+        "required": [
+          "capability",
+          "status",
+          "detail"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "skipped"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "reason"
+              ],
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "capability": {
+                  "enum": [
+                    "environment_canary",
+                    "network_egress",
+                    "docker_socket",
+                    "ssh_agent_socket"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "reason": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "absent"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "capability": {
+                  "enum": [
+                    "docker_socket",
+                    "ssh_agent_socket"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "minItems": 11,
+      "maxItems": 11,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "workspace_read"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "workspace_write"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "outside_read"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "outside_write"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "home_read"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "home_write"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "environment_canary"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "child_process"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "network_egress"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "docker_socket"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "capability": {
+                "const": "ssh_agent_socket"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "checker_version",
+    "fixture_profile",
+    "tool_path",
+    "run_id",
+    "agent",
+    "agent_version",
+    "platform",
+    "probe_platform",
+    "risk_level",
+    "evidence_complete",
+    "evidence_error",
+    "runner_exit_code",
+    "runner_timed_out",
+    "runner_output",
+    "declared_hints",
+    "exposures",
+    "policy_violations",
+    "policy",
+    "host_observations",
+    "probes"
+  ]
+}

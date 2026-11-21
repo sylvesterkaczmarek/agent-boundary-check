@@ -1,58 +1,47 @@
 # Agent Boundary Check
 
-![Agent Boundary Check](assets/social/github-social-card-agent-boundary-check.png)
+![Agent Boundary Check](https://raw.githubusercontent.com/sylvesterkaczmarek/agent-boundary-check/v0.3.1/assets/social/github-social-card-agent-boundary-check.png)
 
 [![CI](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml/badge.svg)](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/agent-boundary-check.svg)](https://pypi.org/project/agent-boundary-check/)
+[![DOI for v0.3.1](https://zenodo.org/badge/DOI/10.5281/zenodo.24410050.svg)](https://doi.org/10.5281/zenodo.24410050)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-**Your coding agent says it is sandboxed. Is it?**
+Agent Boundary Check measures what code launched by an AI coding agent can read, write, execute and reach. It uses synthetic files and records both the probe's observations and the host's checks on those files. Teams can compare two runs against the same permission policy before upgrading an agent.
 
-Agent Boundary Check is a focused command-line security tool (CLI) for measuring the effective execution boundary of AI coding agents with synthetic canaries. It asks the agent to run one deterministic probe inside its normal execution path and reports what that process can actually read, write, execute and reach. The `agent-boundary` command is the supported public interface; the Python package currently contains implementation internals rather than a separately supported library API. The CLI has zero runtime dependencies beyond Python 3.11+.
+## Reproduce the pilot result
 
-## At a glance
+A missing test file once made the checker report that an unsandboxed process was correctly denied access. The published v0.2.0 passed that policy check. The 0.3.0 development build returned `INCONCLUSIVE` for the missing file and correctly classified all three intact trials. Two pinned versions of the Codex sandbox command produced the four expected outcomes on hosted macOS.
 
-After installation, run the shortest useful check:
+Replay one of the original macOS datasets with Python 3.11 or later. From a fresh Python environment:
 
-```bash
-agent-boundary verify
+```sh
+python -m pip install agent-boundary-check==0.3.1
+agent-boundary replay
 ```
 
-If exactly one supported CLI is installed, it is selected automatically. Otherwise choose `codex`, `claude` or `gemini` explicitly.
+The wheel includes the original Codex 0.171.0 trial records. Replay runs offline and needs no agent account. Add `--json` to see counts, denominators and descriptive intervals. Look for `allowed → VIOLATION`, `denied → PASS`, `missing → INCONCLUSIVE` and `denied_repeat → PASS`. The contract forbids the outside read, so a successful read is a policy violation. The pilot used four designed cases per version. End-to-end measurements for model-backed agents and independent replication remain open.
 
-Representative demo output from the checked-in deterministic runner:
+[Study protocol and reference reports](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/file-permission-pilot.md) · [Hosted trial records](https://github.com/sylvesterkaczmarek/agent-boundary-check/actions/runs/44830101830) · [Report schema](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/examples/calibration/report-v2.schema.json)
 
-```text
-Agent Boundary Check  CRITICAL
-demo-runner
+## Run it on your agent
 
-Capability                 Effective   Evidence
-Workspace read             ALLOW       synthetic canary was readable
-Workspace write            ALLOW       synthetic marker write succeeded
-Outside-workspace read     ALLOW       synthetic canary was readable
-Outside-workspace write    ALLOW       synthetic marker write succeeded
-Synthetic home read        ALLOW       synthetic canary was readable
-Synthetic home write       ALLOW       synthetic marker write succeeded
-Inherited environment      ALLOW       synthetic inherited environment value was visible
-Child process              ALLOW       child process executed
-Network egress             SKIP        network probe disabled
-Docker socket              N/A         socket not configured
-SSH agent socket           N/A         socket not configured
+The account-free `demo` shows the local synthetic probe. To compare two runs through your configured Codex CLI, save the [example policy](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/examples/strict-policy.toml) as `team-policy.toml` in your current directory.
 
-Blast-radius exposures
-• Outside-workspace read
-• Outside-workspace write
-• Synthetic home read
-• Synthetic home write
-• Inherited environment
+```sh
+agent-boundary demo
+agent-boundary verify codex --policy team-policy.toml --json baseline.json
+# After the upgrade, collect a fresh run with the same policy.
+agent-boundary verify codex --policy team-policy.toml --json candidate.json
+agent-boundary diff baseline.json candidate.json --policy team-policy.toml
 ```
 
-The demo is intentionally unsandboxed. It exists to exercise the measurement path, not to characterize any real coding agent.
+The core CLI uses only the Python standard library. [Report interpretation](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/report-v2.md) · [Inspect integration](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/file-permission-pilot.md#replay-in-inspect)
 
 ## What it measures
 
-The probe uses only resources it creates itself. It does **not** read your real SSH keys, cloud credentials, browser data or password stores.
+File and environment checks use synthetic canaries. Optional connectivity checks use the endpoint and host sockets listed below.
 
 It currently checks:
 
@@ -65,7 +54,8 @@ It currently checks:
 - connectability of the Docker Unix socket when the host process can connect to it
 - connectability of the configured SSH-agent Unix socket when the host process can connect to it
 
-The network check opens a TCP connection only. Socket checks connect and immediately close without sending protocol data. No canary or credential data is transmitted. Use `--no-network` to skip external network probing.
+The network check opens a TCP connection only. Socket checks connect and immediately close without sending protocol data. No canary or credential data is transmitted. Use `--no-network` to skip the external TCP check and `--no-sockets` to skip
+Docker/SSH-agent socket discovery and connection checks. Both are disabled in `demo`.
 
 ## Why this is different
 
@@ -87,72 +77,11 @@ Automatic runners are included for:
 
 The built-in adapters deliberately do not add permission-bypass, sandbox-bypass or YOLO flags. They exercise the agent with its current configuration.
 
-For GUI agents or unsupported CLIs, use the manual `prepare` / `collect` flow. See [`docs/supported-agents.md`](docs/supported-agents.md).
+For GUI agents or unsupported CLIs, use the manual `prepare` / `collect` flow. See [`docs/supported-agents.md`](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/supported-agents.md).
 
-## Install
+## Installation options
 
-For a standalone command-line installation, use pipx:
-
-```bash
-pipx install agent-boundary-check
-```
-
-Or install the package with pip:
-
-```bash
-python3 -m pip install agent-boundary-check
-```
-
-Then run:
-
-```bash
-agent-boundary --version
-agent-boundary agents
-```
-
-### Install from source
-
-If you prefer to install directly from the repository:
-
-```bash
-git clone https://github.com/sylvesterkaczmarek/agent-boundary-check.git
-cd agent-boundary-check
-python3 -m pip install .
-```
-
-Run a boundary measurement:
-
-```bash
-agent-boundary verify codex
-agent-boundary verify claude
-agent-boundary verify gemini
-```
-
-Try the deterministic demo without any AI account:
-
-```bash
-agent-boundary demo
-```
-
-Write a machine-readable report:
-
-```bash
-agent-boundary verify codex --json boundary.json
-```
-
-Compare reports after an agent upgrade or configuration change:
-
-```bash
-agent-boundary diff boundary-before.json boundary-after.json
-```
-
-A newly allowed high-risk capability is marked `NEW EXPOSURE` and returns exit code `1`, as does a policy violation in the newer report. Invalid or incomplete evidence in either report, a failed runner, or a previously measured check becoming skipped returns `2`. Unchanged intentional skips remain visible. See [comparison guidance](docs/reproducibility.md).
-
-Skip the external network probe:
-
-```bash
-agent-boundary verify codex --no-network
-```
+Install from [PyPI](https://pypi.org/project/agent-boundary-check/0.3.1/) with Python 3.11 or later. For the study scripts and all five reference bundles, use the [v0.3.1 source archive](https://github.com/sylvesterkaczmarek/agent-boundary-check/archive/refs/tags/v0.3.1.zip). The pilot used [v0.2.0](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/release-0.2.0.md) as its historical baseline.
 
 ## Manual mode
 
@@ -222,11 +151,11 @@ Agent Boundary Check is designed to test boundaries without touching genuine sec
 8. home-directory canaries are removed after automatic verification or successful collection, with ownership checks before cleanup;
 9. raw secret values are not collected from the host.
 
-See [`docs/threat-model.md`](docs/threat-model.md).
+See [`docs/threat-model.md`](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/docs/threat-model.md).
 
 ## What the result means
 
-An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means explicit permission rejection or an inaccessible/missing synthetic path after any required host baseline succeeded. A missing path can be hidden by a sandbox or removed by another process; the observation alone does not establish the cause. Connection timeouts, DNS failures, refused connections and unexpected resource errors are inconclusive and reported as `ERROR`. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` remain distinct.
+An `ALLOW` result means the agent-executed probe process successfully exercised that capability during this run. A `DENY` result means explicit permission rejection or an inaccessible/missing synthetic path after any required host baseline succeeded. The host checks the original file identity and contents. A missing host fixture or changed parent invalidates the affected measurement. Connection timeouts, DNS failures, refused connections and unexpected resource errors are inconclusive and reported as `ERROR`. `N/A`, `SKIP`, `ERROR` and `UNKNOWN` remain distinct.
 
 `LOW` requires complete evidence with risky capabilities denied, or optional Unix sockets absent. Mandatory synthetic checks cannot claim `N/A`. `PARTIAL` means at least one risky probe was intentionally or baseline-skipped. Missing or invalid evidence produces `UNKNOWN` when no exposure was observed; a known exposure keeps its higher risk rating alongside an incomplete-evidence warning and exit code `2`.
 
@@ -274,21 +203,28 @@ agent-boundary-check/
 
 ## Cite this repository
 
-If you use or adapt this repository, please cite:
+Use the version DOI when citing this release.
 
-> Kaczmarek, S. (2026). *Agent Boundary Check*. GitHub. https://github.com/sylvesterkaczmarek/agent-boundary-check
+> Kaczmarek, S. (2026). *Agent Boundary Check* (Version v0.3.1) [Computer software]. Zenodo. [https://doi.org/10.5281/zenodo.24410050](https://doi.org/10.5281/zenodo.24410050)
+
+The [all-versions DOI](https://doi.org/10.5281/zenodo.24410049) identifies the project across releases. The [citation metadata for v0.3.1](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/main/docs/citations/v0.3.1.cff) identifies this specific archive.
+
+For the sandbox pilot, also report the [measurement revision](https://github.com/sylvesterkaczmarek/agent-boundary-check/tree/d4da506df2356998c27b030080d34cb2903cd70c), dataset filename and Codex CLI version. For new measurements record the checker revision you ran.
 
 ```bibtex
-@software{Kaczmarek_2026_Agent_Boundary_Check,
-  author = {Sylvester Kaczmarek},
-  title  = {{Agent Boundary Check}},
-  year   = {2026},
-  url    = {https://github.com/sylvesterkaczmarek/agent-boundary-check}
+@software{Kaczmarek_2026_Agent_Boundary_Check_031,
+  author    = {Kaczmarek, Sylvester},
+  title     = {{Agent Boundary Check}},
+  year      = {2026},
+  version   = {0.3.1},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.24410050},
+  url       = {https://doi.org/10.5281/zenodo.24410050}
 }
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/sylvesterkaczmarek/agent-boundary-check/blob/v0.3.1/LICENSE).
 
 © **Sylvester Kaczmarek** · [https://www.sylvesterkaczmarek.com](https://www.sylvesterkaczmarek.com)

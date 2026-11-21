@@ -1,0 +1,21 @@
+{
+  "candidate_commit": "b5d0910f53095ebdbdb99fa9bc136fff2e35814a",
+  "baseline_tests_passed": 271,
+  "new_cases_before": 39,
+  "passed_before": 23,
+  "failed_before": 16,
+  "finding_groups": [
+    "type-coercing stream equality",
+    "standalone manifest preflight",
+    "post-creation I/O classification"
+  ],
+  "repaired_original_cases_passed": 39,
+  "full_review_cases_passed": 49,
+  "final_source_tests_passed": 328,
+  "original_implementation_cases_failed_on_base": 17,
+  "original_implementation_cases_passed_after": 17,
+  "live_model_sessions": 0,
+  "real_host_socket_probes": 0,
+  "external_probes": 0,
+  "scope": "Synthetic local fixtures; separate test design, not external certification."
+}

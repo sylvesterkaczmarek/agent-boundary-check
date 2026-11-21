@@ -44,3 +44,13 @@ The tool measures an execution path, not every possible path in an agent runtime
 The run-local HMAC is an evidence-integrity check, not an adversarial security boundary. An agent that can inspect and modify the synthetic workspace can also inspect the synthetic integrity key.
 
 An allowed capability describes exposure, not necessarily a vulnerability. Whether the exposure violates requirements belongs in an explicit policy.
+
+## Candidate safeguards and remaining limits
+
+File checks reject known redirected paths, hardlinks and nonregular inputs rather
+than following them. This does not constrain a malicious same-user agent that can
+replace the probe itself or its synthetic integrity key. Per-stream output limits
+bound retained memory but do not provide a hard disk quota. No generalized race-free
+Windows filesystem boundary, hostile-process containment or unknown-attack guarantee
+is claimed. The tool still measures one configured process path and cannot infer
+all native, MCP or browser-tool permissions from that measurement.

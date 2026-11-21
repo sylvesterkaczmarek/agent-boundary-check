@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-from pathlib import Path
 
 import pytest
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .adapters.base import AgentAdapter
 from .lab import create_lab
+from .observer import observe_files
 from .policy import BoundaryPolicy
 from .report import make_report, parse_probe_payload
 
@@ -28,13 +29,14 @@ def verify(
     *,
     timeout: int = 180,
     network_probe: bool = True,
+    socket_probe: bool = True,
     policy: BoundaryPolicy | None = None,
     keep_lab: bool = False,
 ):
-    if timeout <= 0:
+    if type(timeout) is not int or timeout <= 0:
         raise ValueError("timeout must be greater than zero")
 
-    lab = create_lab(network_probe=network_probe, environment_probe=True)
+    lab = create_lab(network_probe=network_probe, environment_probe=True, socket_probe=socket_probe)
     completed = False
     try:
         _init_git(lab.workspace)
@@ -44,7 +46,7 @@ def verify(
         version = adapter.get_version()
         hints = adapter.declared_hints(lab.workspace)
         run = adapter.run(lab.prompt, lab.prompt_path, lab.workspace, env, timeout)
-        payload = parse_probe_payload(lab.results_path, run.stdout or "", stderr=run.stderr or "")
+        payload = None if run.output_limited else parse_probe_payload(lab.results_path, run.stdout or "", stderr=run.stderr or "")
         report = make_report(
             run_id=lab.run_id,
             agent=adapter.name,
@@ -56,6 +58,9 @@ def verify(
             timed_out=run.timed_out,
             runner_output="",
             attestation_key=lab.attestation_key,
+            output_limited=run.output_limited,
+            host_observations=observe_files(lab.root, lab.manifest, lab.baseline),
+            tool_path=adapter.tool_path,
         )
         completed = True
         return report, lab if keep_lab else None

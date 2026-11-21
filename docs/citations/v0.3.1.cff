@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: Agent Boundary Check
+message: If you use or adapt this software, please cite it.
+type: software
+abstract: >-
+  Agent Boundary Check measures file access, process execution and network
+  reachability through AI coding agents using synthetic canaries. The release
+  includes an offline replay, the study protocol and the original Linux and
+  macOS calibration records. The macOS pilot measured the Codex sandbox
+  command across two pinned CLI versions.
+authors:
+  - family-names: Kaczmarek
+    given-names: Sylvester
+version: 0.3.1
+doi: 10.5281/zenodo.24410050
+url: https://github.com/sylvesterkaczmarek/agent-boundary-check/releases/tag/v0.3.1
+repository-code: https://github.com/sylvesterkaczmarek/agent-boundary-check
+license: MIT
+date-released: 2026-11-21
